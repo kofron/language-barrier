@@ -88,3 +88,48 @@ impl crate::provider::gemini::GeminiModelInfo for Gemini {
         }.to_string()
     }
 }
+
+/// Represents an OpenAI GPT model
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GPT {
+    /// GPT-4o model
+    GPT4o,
+    /// GPT-4o-mini model
+    GPT4oMini,
+    /// GPT-4 Turbo model
+    GPT4Turbo,
+    /// GPT-3.5 Turbo model
+    GPT35Turbo,
+}
+
+impl ModelInfo for GPT {
+    fn context_window(&self) -> usize {
+        match self {
+            Self::GPT4o => 128_000,
+            Self::GPT4oMini => 128_000,
+            Self::GPT4Turbo => 128_000,
+            Self::GPT35Turbo => 16_000,
+        }
+    }
+
+    fn max_output_tokens(&self) -> usize {
+        match self {
+            Self::GPT4o => 4_096,
+            Self::GPT4oMini => 4_096,
+            Self::GPT4Turbo => 4_096,
+            Self::GPT35Turbo => 4_096,
+        }
+    }
+}
+
+// Implement the OpenAIModelInfo trait from provider/openai.rs
+impl crate::provider::openai::OpenAIModelInfo for GPT {
+    fn openai_model_id(&self) -> String {
+        match self {
+            Self::GPT4o => "gpt-4o",
+            Self::GPT4oMini => "gpt-4o-mini",
+            Self::GPT4Turbo => "gpt-4-turbo",
+            Self::GPT35Turbo => "gpt-3.5-turbo",
+        }.to_string()
+    }
+}

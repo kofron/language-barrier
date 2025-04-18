@@ -6,6 +6,7 @@ use reqwest::Request;
 // Include the provider-specific modules
 pub mod anthropic;
 pub mod gemini;
+pub mod openai;
 
 /// An HTTPProvider can take a chat and turn it into an http request.
 pub trait HTTPProvider<M: ModelInfo> {
