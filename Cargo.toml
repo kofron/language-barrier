@@ -18,3 +18,5 @@ url = "^2.5.4"
 
 [dev-dependencies]
 tokio-test = "0.4"
+dotenv = "0.15"
+hyper = "0.14"

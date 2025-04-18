@@ -87,6 +87,11 @@ where
         self.history.push(msg);
         self.trim_to_context_window();
     }
+    
+    /// Alias for push_message for better readability
+    pub fn add_message(&mut self, msg: Message) {
+        self.push_message(msg);
+    }
 
     /// Sets a new compactor strategy at runtime
     pub fn set_compactor<C: ChatHistoryCompactor>(&mut self, comp: C) {

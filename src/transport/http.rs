@@ -1,11 +1,4 @@
-use async_trait::async_trait;
-use reqwest::{Client, header};
-use std::collections::HashMap;
-
-use crate::error::{Error, Result};
-use crate::message::Message;
-
-use crate::model::ModelInfo;
+use reqwest::Client;
 
 /// HTTP Transport implementation for making API requests to LLM providers
 #[derive(Debug, Clone)]
