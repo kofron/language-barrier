@@ -42,6 +42,30 @@ The library is organized into the following components:
 
 5. **Async API**: Using `async-trait` to allow async methods in traits, enabling a clean interface for operations that require network I/O.
 
+#### 2024-04-17: LlmProvider Trait Design
+
+1. **LlmProvider Trait**: Created a core abstraction for interacting with LLMs:
+   - Async methods for all operations to support network I/O
+   - Clear contract that specifies message generation, model listing, and capability checking
+   - Support for configuration options through the `GenerationOptions` struct
+   - Function and tool calling support through the response format
+
+2. **MockProvider Implementation**:
+   - Simple mock implementation that returns predefined responses
+   - Supports pattern matching to determine response based on message content
+   - Fully tested with comprehensive unit tests
+   - Designed for development and testing without external dependencies
+
+3. **AdvancedMockProvider Implementation**:
+   - Extension of the basic MockProvider that adds tool and function calling simulation
+   - Enables testing of tool/function calling capabilities without real API usage
+   - Uses composition pattern to extend the base implementation
+
+4. **Generation Options**:
+   - Flexible parameter passing through a builder pattern
+   - Support for common LLM parameters like temperature and top_p
+   - Extensible through extra_params for provider-specific parameters
+
 ## Future Directions
 
 1. **Streaming**: Support for streaming responses from LLMs.
@@ -51,6 +75,7 @@ The library is organized into the following components:
 5. **Rate Limiting**: Intelligent rate limiting to avoid provider quotas.
 6. **Middleware**: Pluggable middleware for logging, metrics, etc.
 7. **Local Models**: Support for running LLMs locally.
+8. **Real Provider Implementations**: Implementations for major providers like OpenAI, Anthropic, etc.
 
 ## Implementation Notes
 
