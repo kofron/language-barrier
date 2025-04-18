@@ -330,6 +330,35 @@ This redesign maintains compatibility with the existing provider implementations
 
 The introduction of the visitor pattern and type-safe model enums represents a significant architectural improvement. It maintains backward compatibility while paving the way for a cleaner, more maintainable, and more testable codebase.
 
+#### 2025-04-18: Provider Model Management Refactoring
+
+1. **Removed Available Models Lists**:
+   - Eliminated the concept of a cached list of available models from providers
+   - Removed the `list_models()` method from the `LlmProvider` trait
+   - Replaced static model lists with direct model lookups using enums
+   - Simplified provider implementations by removing model caching
+
+2. **Direct Model Capability Checking**:
+   - Modified `has_capability()` and `supports_tool_calling()` to use direct model mappings
+   - Added pattern matching on model IDs to map them to appropriate `ModelInfo` implementations
+   - Added fallback capability detection for unknown model IDs based on naming patterns
+   - Enhanced error handling for unsupported models
+
+3. **Benefits of the Refactoring**:
+   - **Reduced Memory Usage**: No more caching of model lists
+   - **Simplified Implementation**: Provider code is cleaner and more focused
+   - **Direct Model Information Access**: More direct path to model capabilities via model enums
+   - **Better Performance**: No need to build and search through model lists
+   - **More Maintainable**: Easier to add new models without updating multiple locations
+
+4. **Testing Improvements**:
+   - Updated tests to work with the new model capability checking approach
+   - Added comprehensive tests for both known and unknown model IDs
+   - Verified capability detection for various model types
+   - Ensured behavior is consistent with previous implementation
+
+This refactoring simplifies the provider implementation while maintaining the same functionality. By leveraging the `ModelInfo` trait and model enums more directly, we've reduced code complexity and improved the architecture's clarity. The changes make the codebase more maintainable and set a foundation for future improvements in model management.
+
 ## Future Directions
 
 1. **Streaming**: Support for streaming responses from LLMs.

@@ -198,24 +198,6 @@ pub struct GenerationResult {
 /// The main trait that defines the contract for LLM providers
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
-    /// List available models for this provider
-    ///
-    /// Returns a list of models that are available for use with this provider.
-    /// 
-    /// # Examples
-    ///
-    /// ```
-    /// use language_barrier::client::{LlmProvider, MockProvider};
-    /// 
-    /// # async fn example() -> language_barrier::error::Result<()> {
-    /// let provider = MockProvider::new();
-    /// let models = provider.list_models().await?;
-    /// println!("Available models: {}", models.len());
-    /// # Ok(())
-    /// # }
-    /// ```
-    async fn list_models(&self) -> Result<Vec<Model>>;
-
     /// Generate a response from a list of messages
     ///
     /// Takes a list of messages representing a conversation and returns a
@@ -437,10 +419,6 @@ impl MockProvider {
 
 #[async_trait]
 impl LlmProvider for MockProvider {
-    async fn list_models(&self) -> Result<Vec<Model>> {
-        Ok(self.models.clone())
-    }
-
     async fn generate(
         &self,
         model: &str,
@@ -620,10 +598,6 @@ impl AdvancedMockProvider {
 
 #[async_trait]
 impl LlmProvider for AdvancedMockProvider {
-    async fn list_models(&self) -> Result<Vec<Model>> {
-        self.inner.list_models().await
-    }
-
     async fn generate(
         &self,
         model: &str,
@@ -669,15 +643,6 @@ mod tests {
     use super::*;
     use crate::message::{MessageRole, Content};
     use crate::model::ModelCapability;
-
-    #[tokio::test]
-    async fn test_mock_provider_list_models() {
-        let provider = MockProvider::new();
-        let models = provider.list_models().await.unwrap();
-        
-        assert_eq!(models.len(), 1);
-        assert_eq!(models[0].id, "mock-model");
-    }
 
     #[tokio::test]
     async fn test_mock_provider_generate() {

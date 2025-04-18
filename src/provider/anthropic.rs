@@ -83,8 +83,6 @@ impl Default for AnthropicConfig {
 pub struct AnthropicProvider {
     /// Configuration for the provider
     config: AnthropicConfig,
-    /// Cache of available models
-    models: Arc<Mutex<Option<Vec<Model>>>>,
 }
 
 impl Default for AnthropicProvider {
@@ -126,7 +124,6 @@ impl AnthropicProvider {
     pub fn with_config(config: AnthropicConfig) -> Self {
         Self {
             config,
-            models: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -409,40 +406,6 @@ impl AnthropicProvider {
 
 #[async_trait]
 impl LlmProvider for AnthropicProvider {
-    async fn list_models(&self) -> Result<Vec<Model>> {
-        // Check cache first
-        {
-            let models = self.models.lock().unwrap();
-            if let Some(models) = &*models {
-                return Ok(models.clone());
-            }
-        }
-
-        // Define all supported Claude models
-        let models = vec![
-            // Claude 3 models
-            Model::from(AnthropicModel::Opus3),
-            Model::from(AnthropicModel::Sonnet3),
-            Model::from(AnthropicModel::Sonnet35),
-            Model::from(AnthropicModel::Sonnet37),
-            Model::from(AnthropicModel::Haiku3),
-            Model::from(AnthropicModel::Haiku35),
-            
-            // Claude 2 models
-            Model::from(AnthropicModel::Claude21),
-            Model::from(AnthropicModel::Claude20),
-            Model::from(AnthropicModel::ClaudeInstant12),
-        ];
-
-        // Cache the models
-        {
-            let mut models_cache = self.models.lock().unwrap();
-            *models_cache = Some(models.clone());
-        }
-
-        Ok(models)
-    }
-
     async fn generate(
         &self,
         model: &str,
@@ -452,17 +415,7 @@ impl LlmProvider for AnthropicProvider {
         // Create an HTTP transport
         let transport = crate::transport::http::HttpTransport::new();
         
-        // Validate the model and find the corresponding AnthropicModel
-        let models = self.list_models().await?;
-        let _model_info = models.iter().find(|m| m.id == model).ok_or_else(|| {
-            Error::UnsupportedModel(format!(
-                "Model '{}' not found in Anthropic provider",
-                model
-            ))
-        })?;
-        
         // Find the matching AnthropicModel enum or use a generic approach
-        // This is a temporary solution until we fully transition to enums
         let model_result = match model {
             "claude-3-opus-20240229" => self.accept(&transport, &AnthropicModel::Opus3, messages, options).await,
             "claude-3-sonnet-20240229" => self.accept(&transport, &AnthropicModel::Sonnet3, messages, options).await,
@@ -519,16 +472,37 @@ impl LlmProvider for AnthropicProvider {
     }
 
     async fn has_capability(&self, model: &str, capability: ModelCapability) -> Result<bool> {
-        let models = self.list_models().await?;
-
-        if let Some(model) = models.iter().find(|m| m.id == model) {
-            Ok(model.has_capability(capability))
-        } else {
-            Err(Error::UnsupportedModel(format!(
-                "Model '{}' not found",
-                model
-            )))
-        }
+        // Convert the string model ID to a ModelInfo instance
+        let model_info = match model {
+            "claude-3-opus-20240229" => AnthropicModel::Opus3,
+            "claude-3-sonnet-20240229" => AnthropicModel::Sonnet3,
+            "claude-3.5-sonnet-20240620" => AnthropicModel::Sonnet35,
+            "claude-3-7-sonnet-20250219" => AnthropicModel::Sonnet37,
+            "claude-3-haiku-20240307" => AnthropicModel::Haiku3,
+            "claude-3.5-haiku-20240307" => AnthropicModel::Haiku35,
+            "claude-2.1" => AnthropicModel::Claude21,
+            "claude-2.0" => AnthropicModel::Claude20,
+            "claude-instant-1.2" => AnthropicModel::ClaudeInstant12,
+            // For unknown models, infer capabilities based on the model name
+            _ if model.starts_with("claude-3") => {
+                return Ok(match capability {
+                    ModelCapability::ChatCompletion | 
+                    ModelCapability::TextGeneration | 
+                    ModelCapability::Vision |
+                    ModelCapability::ToolCalling => true,
+                    _ => false,
+                })
+            }
+            _ => {
+                return Ok(match capability {
+                    ModelCapability::ChatCompletion | 
+                    ModelCapability::TextGeneration => true,
+                    _ => false,
+                })
+            }
+        };
+        
+        Ok(model_info.has_capability(capability))
     }
 }
 
@@ -676,27 +650,17 @@ mod tests {
     // Let's remove it to simplify things
 
     #[tokio::test]
-    async fn test_list_models() {
+    async fn test_model_capabilities() {
         let provider = AnthropicProvider::new();
-        let models = provider.list_models().await.unwrap();
-
-        // Make sure we've got the expected models
-        assert!(models.iter().any(|m| m.id == "claude-3-opus-20240229"));
-        assert!(models.iter().any(|m| m.id == "claude-3-sonnet-20240229"));
-        assert!(models.iter().any(|m| m.id == "claude-3-haiku-20240307"));
-
-        // Check that they have the right capabilities
-        let opus = models
-            .iter()
-            .find(|m| m.id == "claude-3-opus-20240229")
-            .unwrap();
-        assert!(opus.has_capability(ModelCapability::ChatCompletion));
-        assert!(opus.has_capability(ModelCapability::Vision));
-        assert!(opus.has_capability(ModelCapability::ToolCalling));
+        
+        // Check models have the right capabilities
+        assert!(provider.has_capability("claude-3-opus-20240229", ModelCapability::ChatCompletion).await.unwrap());
+        assert!(provider.has_capability("claude-3-opus-20240229", ModelCapability::Vision).await.unwrap());
+        assert!(provider.has_capability("claude-3-opus-20240229", ModelCapability::ToolCalling).await.unwrap());
 
         // Make sure Claude 2 doesn't have tool calling
-        let claude2 = models.iter().find(|m| m.id == "claude-2.1").unwrap();
-        assert!(!claude2.has_capability(ModelCapability::ToolCalling));
+        assert!(!provider.has_capability("claude-2.1", ModelCapability::ToolCalling).await.unwrap());
+        assert!(provider.has_capability("claude-2.1", ModelCapability::ChatCompletion).await.unwrap());
     }
 
     #[tokio::test]
