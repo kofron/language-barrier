@@ -1,10 +1,10 @@
-use crate::Chat;
 use crate::error::{Error, Result};
 use crate::message::{Content, ContentPart, Message, MessageRole};
-use crate::model::ModelInfo;
+use crate::model::Sonnet35Version;
 use crate::provider::HTTPProvider;
+use crate::{Chat, Claude};
 use async_trait::async_trait;
-use reqwest::{Method, Request};
+use reqwest::{Method, Request, Response, Url};
 use serde::{Deserialize, Serialize};
 use std::env;
 
@@ -81,9 +81,10 @@ impl Default for AnthropicProvider {
 }
 
 #[async_trait]
-impl HTTPProvider for AnthropicProvider {
-    async fn accept<M: ModelInfo>(&self, chat: Chat<M>) -> Result<Request> {
-        let mut request = Request::new(Method::POST, format!("{}/messages", self.config.base_url));
+impl HTTPProvider<Claude> for AnthropicProvider {
+    async fn accept(&self, chat: Chat<Claude>) -> Result<Request> {
+        let url = Url::parse(format!("{}/messages", self.config.base_url).as_str())?;
+        let mut request = Request::new(Method::POST, url);
 
         // Set headers
         request.headers_mut().insert(
@@ -119,24 +120,72 @@ impl HTTPProvider for AnthropicProvider {
 
         Ok(request)
     }
+
+    async fn parse(&self, response: Response) -> Result<Message> {
+        // Check if the response was successful
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.map_err(Error::Request)?;
+
+            return match status.as_u16() {
+                401 => Err(Error::Authentication(format!(
+                    "Anthropic API authentication failed: {}",
+                    error_text
+                ))),
+                429 => Err(Error::RateLimit(format!(
+                    "Anthropic API rate limit exceeded: {}",
+                    error_text
+                ))),
+                _ => Err(Error::Other(format!(
+                    "Anthropic API error ({}): {}",
+                    status, error_text
+                ))),
+            };
+        }
+
+        // Parse the response body
+        let response_text = response.text().await.map_err(Error::Request)?;
+        let anthropic_response: AnthropicResponse =
+            serde_json::from_str(&response_text).map_err(Error::Serialization)?;
+
+        // Convert to our message format using the existing From implementation
+        let message = Message::from(&anthropic_response);
+
+        Ok(message)
+    }
 }
 
 impl AnthropicProvider {
+    fn id_for_model(model: Claude) -> &'static str {
+        match model {
+            Claude::Sonnet37 { .. } => "sonnet-3-7-latest",
+            Claude::Sonnet35 {
+                version: Sonnet35Version::V1,
+            } => "sonnet-3-5-1",
+            Claude::Sonnet35 {
+                version: Sonnet35Version::V2,
+            } => "sonnet-3-5-2",
+            Claude::Opus3 => "opus-3",
+            Claude::Haiku3 => "haiku-3",
+            Claude::Haiku35 => "haiku-3-5",
+        }
+    }
+
     /// Creates a request payload from a Chat object
     ///
     /// This method converts the Chat's messages and settings into an Anthropic-specific
     /// format for the API request.
-    fn create_request_payload<M: ModelInfo>(&self, chat: &Chat<M>) -> Result<AnthropicRequest> {
+    fn create_request_payload(&self, chat: &Chat<Claude>) -> Result<AnthropicRequest> {
         // Convert system prompt if present
-        let system = if !chat.system_prompt().is_empty() {
-            Some(chat.system_prompt().clone())
+        let system = if !chat.system_prompt.is_empty() {
+            Some(chat.system_prompt.clone())
         } else {
             None
         };
 
         // Convert messages
         let messages: Vec<AnthropicMessage> = chat
-            .history()
+            .history
             .iter()
             .filter(|msg| msg.role != MessageRole::System) // Filter out system messages as they go in system field
             .map(AnthropicMessage::from)
@@ -144,10 +193,10 @@ impl AnthropicProvider {
 
         // Create the request
         let request = AnthropicRequest {
-            model: chat.model().model_id().to_string(),
+            model: Self::id_for_model(chat.model).to_string(),
             messages,
             system,
-            max_tokens: Some(chat.max_output_tokens()),
+            max_tokens: Some(chat.max_output_tokens),
             temperature: None,
             top_p: None,
             top_k: None,
@@ -429,7 +478,6 @@ mod tests {
     use super::*;
     use crate::message::ImageUrl;
     use crate::message::{Content, ContentPart, Message, MessageRole};
-    use crate::model::Claude;
 
     #[test]
     fn test_message_to_anthropic_conversion() {

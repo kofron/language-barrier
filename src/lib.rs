@@ -13,12 +13,11 @@ pub mod tool;
 pub mod transport;
 
 // Re-export the main types for convenient usage
-pub use chat::{Chat, ChatBuilder, ChatMessage, ChatResponse};
+pub use chat::Chat;
 pub use compactor::{ChatHistoryCompactor, DropOldestCompactor};
 pub use error::Error;
 pub use message::{Content, Message, MessageRole};
 pub use model::{Claude, ModelInfo};
-pub use provider::Provider;
+
 pub use secret::Secret;
 pub use token::TokenCounter;
-pub use transport::{AnthropicTransportVisitor, GoogleTransportVisitor, TransportVisitor};

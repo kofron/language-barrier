@@ -1,22 +1,19 @@
 use crate::ModelInfo;
 use crate::compactor::{ChatHistoryCompactor, DropOldestCompactor};
-
 use crate::message::{Content, Message};
 use crate::token::TokenCounter;
-use crate::tool::Tool;
 
 /// The main Chat client that users will interact with
 pub struct Chat<M> {
     // Immutable after construction
-    model: M,
+    pub model: M,
 
     // Tunable knobs / state
-    system_prompt: String,
-    max_output_tokens: usize,
-    tools: Vec<Box<dyn Tool>>,
+    pub system_prompt: String,
+    pub max_output_tokens: usize,
 
     // History and token tracking
-    history: Vec<Message>,
+    pub history: Vec<Message>,
     token_counter: TokenCounter,
     compactor: Box<dyn ChatHistoryCompactor>,
 }
@@ -34,7 +31,6 @@ where
             history: Vec::new(),
             token_counter: TokenCounter::default(),
             compactor: Box::<DropOldestCompactor>::default(),
-            tools: Vec::new(),
         }
     }
 

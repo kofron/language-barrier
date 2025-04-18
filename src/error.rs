@@ -11,6 +11,9 @@ pub enum Error {
     #[error("HTTP request error: {0}")]
     Request(#[from] reqwest::Error),
 
+    #[error("Couldn't parse base url")]
+    BaseUrlError(#[from] url::ParseError),
+
     /// Rate limit exceeded
     #[error("Rate limit exceeded: {0}")]
     RateLimit(String),
