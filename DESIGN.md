@@ -97,16 +97,149 @@ The library is organized into the following components:
    - Direct integration with the mock provider ecosystem
    - Comprehensive tests for all features including conversation management
 
+#### 2025-04-17: Tool System Implementation
+
+1. **Tool Trait**: Created a standardized interface for tools that can be used by LLMs:
+   - Defined through the `Tool` trait, which requires methods for name, description, parameter schema, and execution
+   - Supports both synchronous and asynchronous execution via the `async_trait` crate
+   - Compatible with OpenAI's function calling format
+   - Easily extensible with custom tools
+
+2. **Calculator Tool**: Implemented a simple calculator tool as an example:
+   - Supports basic arithmetic operations (add, subtract, multiply, divide)
+   - Handles parameter validation and error cases
+   - Demonstrates the pattern for creating new tools
+
+3. **Provider Integration**:
+   - Extended the `LlmProvider` trait with methods for registering and executing tools
+   - Added tool support to the `GenerationOptions` struct
+   - Updated the `MockProvider` implementation to support tools
+
+4. **Chat Interface**:
+   - Added tool support to the `ChatOptions` struct
+   - Implemented `send_message_with_tools` method for automatic tool execution
+   - Added methods to add tools and set tool choice strategy
+   - Extended the conversation flow to handle tool calls and responses
+
+5. **Error Handling**:
+   - Added specific error types for tool-related operations
+   - Comprehensive validation of tool parameters
+
+6. **Tests and Documentation**:
+   - Added unit tests for the Tool trait and Calculator implementation
+   - Added integration tests for the full tool workflow
+   - Added comprehensive doctests showing tool usage
+
+The tool system design follows our core design principles:
+- **Provider-agnostic**: Tools work with any LLM provider
+- **Type safety**: Parameter schemas provide clear contracts
+- **Async-first**: Tools support async execution
+- **Extensibility**: Easy to add new tools
+- **Testability**: Full test coverage for the tool system
+- **Error handling**: Clear error types and validation
+
+The implementation aligns with the OpenAI function calling format, making it compatible with existing LLM providers while maintaining our abstraction layer.
+
+#### 2025-04-17: Anthropic Provider Implementation
+
+1. **Anthropic API Integration**:
+   - Implemented the Anthropic provider that connects to Anthropic's API
+   - Handles authentication with API keys
+   - Supports system messages as a separate parameter (following Anthropic's API design)
+   - Includes proper error handling and response parsing
+
+2. **Message Format Conversion**:
+   - Created bidirectional conversion between our message format and Anthropic's format
+   - System messages are handled specially (as required by Anthropic's API)
+   - Tool calls and responses are properly mapped between formats
+   - Handles multimodal content (text and images)
+
+3. **Tool Support**:
+   - Implemented tool calling for Claude 3 models
+   - Mapped our Tool trait to Anthropic's tool format
+   - Supports both tool execution and tool response handling
+   - Handles tool choice strategies (auto, none, specific, any)
+
+4. **Model Management**:
+   - Added all Claude models (Claude 3 Opus, Sonnet, Haiku, Claude 2, etc.)
+   - Correctly configured capabilities for each model
+   - Implemented capability checking for the models
+   - Added caching to improve performance
+
+5. **Testing and Validation**:
+   - Comprehensive unit tests for all key functionality
+   - Message format conversion tests ensure correct mapping
+   - Tool calling tests verify proper integration
+
+The Anthropic provider implementation follows our core design principles:
+- **Provider-agnostic API**: The provider seamlessly integrates with our existing abstractions
+- **Type safety**: Strong types for all Anthropic-specific structures
+- **Async-first**: All operations are async for efficient network I/O
+- **Extensibility**: Easy to extend with additional Anthropic-specific features
+- **Testability**: Well-tested implementation with mock responses
+- **Error handling**: Comprehensive error handling specific to Anthropic's API
+
+#### 2025-04-18: Google Provider Implementation
+
+1. **Google Generative AI API Integration**:
+   - Implemented the Google provider that connects to the Google Generative AI API
+   - Configured HTTP client with proper authentication via API key
+   - Supports both direct API key authentication and other Google Cloud credentials (via project ID)
+   - Includes comprehensive error handling for various Google API error scenarios
+   - Designed for compatibility with Google's specific Gemini model families
+
+2. **Message Format Conversion**:
+   - Created bidirectional mapping between our message format and Google's format
+   - Managed role conversion (Google uses "model" instead of "assistant")
+   - Properly handled multimodal content for both text and images
+   - Implemented special handling for Google's unique content structure
+   - Ensured proper conversion for function/tool calls and responses
+
+3. **Tool Support**:
+   - Implemented function calling support for Gemini models
+   - Mapped our Tool trait to Google's function calling format
+   - Supported tool choice strategies (auto, none, specific)
+   - Converted between Google's function declaration format and our tool format
+   - Implemented proper tool response handling
+
+4. **Model Management**:
+   - Added all current Gemini models (1.0 and 1.5 series)
+   - Correctly configured capabilities for each model
+   - Implemented context window settings based on Google's documentation
+   - Added caching to improve performance
+   - Ensured proper model validation
+
+5. **Testing and Documentation**:
+   - Comprehensive unit tests for all key functionality
+   - Message format conversion tests
+   - Tool calling tests
+   - Detailed docstrings and examples
+
+The Google provider implementation follows our core design principles:
+- **Provider-agnostic API**: The provider seamlessly integrates with our abstractions
+- **Type safety**: Strong types for all Google-specific structures
+- **Async-first**: All operations are async for efficient network I/O
+- **Extensibility**: Easy to extend with additional Google-specific features
+- **Testability**: Well-tested implementation with mock responses
+- **Error handling**: Comprehensive error handling specific to Google's API
+
+Key differences from other providers:
+- Google uses "model" instead of "assistant" for role names
+- Google has a different structure for content parts
+- Google's function calling format differs slightly from OpenAI's
+- Google has specific safety settings that are unique to their API
+- Google's API URL structure includes the model ID in the path
+
 ## Future Directions
 
 1. **Streaming**: Support for streaming responses from LLMs.
-2. **Function Calling**: Improved support for function calling and tools.
-3. **Embeddings**: Unified API for generating and working with embeddings.
-4. **Caching**: Built-in caching to reduce API calls.
-5. **Rate Limiting**: Intelligent rate limiting to avoid provider quotas.
-6. **Middleware**: Pluggable middleware for logging, metrics, etc.
-7. **Local Models**: Support for running LLMs locally.
-8. **Real Provider Implementations**: Implementations for major providers like OpenAI, Anthropic, etc.
+2. **Embeddings**: Unified API for generating and working with embeddings.
+3. **Caching**: Built-in caching to reduce API calls.
+4. **Rate Limiting**: Intelligent rate limiting to avoid provider quotas.
+5. **Middleware**: Pluggable middleware for logging, metrics, etc.
+6. **Local Models**: Support for running LLMs locally.
+7. **Additional Provider Implementations**: Implementations for other major providers like OpenAI.
+8. **Additional Tools**: Implement more tools like web search, weather, etc.
 
 ## Implementation Notes
 
@@ -116,5 +249,7 @@ The library uses the following Rust crates:
 - `thiserror` for error handling
 - `reqwest` for HTTP requests
 - `tokio` for async runtime
+- `regex` for pattern matching in the mock provider
+- `http` for testing HTTP responses
 
 Additional crates may be added as needed for specific features.

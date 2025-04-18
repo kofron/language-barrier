@@ -1,6 +1,16 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+// Include the provider-specific modules
+pub mod anthropic;
+pub mod google;
+
+// Re-export provider implementations
+pub use anthropic::AnthropicProvider;
+pub use anthropic::AnthropicConfig;
+pub use google::GoogleProvider;
+pub use google::GoogleConfig;
+
 /// Represents an AI provider
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Provider {

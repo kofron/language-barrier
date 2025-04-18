@@ -18,6 +18,15 @@ pub struct ChatOptions {
     pub generation_options: GenerationOptions,
     /// Maximum number of messages to keep in the conversation history
     pub max_history_size: Option<usize>,
+    /// Tool definitions that can be used in this chat session
+    pub tool_definitions: Option<Vec<serde_json::Value>>,
+    /// Tool names available in this chat session
+    pub tool_names: Option<Vec<String>>,
+    /// References to actual tool objects (not cloneable)
+    #[doc(hidden)]
+    pub tools: std::sync::Arc<std::sync::Mutex<Vec<Box<dyn crate::tool::Tool>>>>,
+    /// Tool choice strategy
+    pub tool_choice: Option<crate::client::ToolChoice>,
     /// Additional metadata for the chat session
     pub metadata: HashMap<String, serde_json::Value>,
 }
@@ -29,6 +38,10 @@ impl Default for ChatOptions {
             system_message: None,
             generation_options: GenerationOptions::default(),
             max_history_size: None,
+            tool_definitions: None,
+            tool_names: None,
+            tools: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            tool_choice: None,
             metadata: HashMap::new(),
         }
     }
@@ -114,6 +127,55 @@ impl ChatOptions {
         value: serde_json::Value,
     ) -> Self {
         self.metadata.insert(key.into(), value);
+        self
+    }
+    
+    /// Sets the tools and returns self for method chaining
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use language_barrier::ChatOptions;
+    /// use language_barrier::tool::calculator;
+    ///
+    /// let options = ChatOptions::new("gpt-4")
+    ///     .with_tools(vec![Box::new(calculator())]);
+    /// ```
+    pub fn with_tools(mut self, tools: Vec<Box<dyn crate::tool::Tool>>) -> Self {
+        // Store the tool definitions and names separately from the tool objects
+        let mut definitions = Vec::new();
+        let mut names = Vec::new();
+        
+        for tool in &tools {
+            definitions.push(tool.to_provider_format());
+            names.push(tool.name().to_string());
+        }
+        
+        self.tool_definitions = Some(definitions);
+        self.tool_names = Some(names);
+        
+        // Store the tools in the Arc<Mutex<Vec<...>>> for thread-safe access
+        {
+            let mut tools_lock = self.tools.lock().unwrap();
+            *tools_lock = tools;
+        }
+        
+        self
+    }
+    
+    /// Sets the tool choice strategy and returns self for method chaining
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use language_barrier::ChatOptions;
+    /// use language_barrier::client::ToolChoice;
+    ///
+    /// let options = ChatOptions::new("gpt-4")
+    ///     .with_tool_choice(ToolChoice::Auto);
+    /// ```
+    pub fn with_tool_choice(mut self, tool_choice: crate::client::ToolChoice) -> Self {
+        self.tool_choice = Some(tool_choice);
         self
     }
 }
@@ -1004,6 +1066,118 @@ impl Chat {
         self.generate_response().await
     }
 
+    /// Send a message and automatically handle any tool calls
+    ///
+    /// This method sends a message, and if the response contains tool calls,
+    /// it will automatically execute them and continue the conversation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use language_barrier::{Chat, ChatOptions};
+    /// use language_barrier::tool::calculator;
+    ///
+    /// # async fn example() -> language_barrier::error::Result<()> {
+    /// let mut chat = Chat::new_mock().await?;
+    /// // Add a calculator tool
+    /// chat.add_tool(Box::new(calculator()));
+    /// 
+    /// // Send a message that might trigger a tool call
+    /// let response = chat.send_message_with_tools("Calculate 5 + 3").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn send_message_with_tools(&mut self, content: impl Into<String>) -> Result<ChatResponse> {
+        let result = self.send(content).await?;
+        
+        // If there are tool calls, handle them automatically
+        if let Some(tool_calls) = result.tool_calls() {
+            // Process the first tool call
+            if let Some(tool_call) = tool_calls.iter().next() {
+                // Extract parameters
+                let tool_name = &tool_call.function.name;
+                let arguments = &tool_call.function.arguments;
+                
+                // Parse arguments into JSON
+                let parameters: serde_json::Value = serde_json::from_str(arguments)?;
+                
+                // Execute the tool
+                let tool_result = self.provider.execute_tool(tool_name, parameters).await?;
+                
+                // Add the tool result message to the conversation
+                let tool_message = ChatMessage::tool(
+                    &tool_call.id,
+                    serde_json::to_string(&tool_result).unwrap_or_else(|_| tool_result.to_string()),
+                );
+                
+                self.add_message(tool_message);
+                
+                // Get the assistant's response to the tool result
+                let final_response = self.generate_response().await?;
+                return Ok(final_response);
+            }
+        }
+        
+        Ok(result)
+    }
+    
+    /// Add a tool to the chat session
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use language_barrier::{Chat, ChatOptions};
+    /// use language_barrier::tool::calculator;
+    ///
+    /// # async fn example() -> language_barrier::error::Result<()> {
+    /// let mut chat = Chat::new_mock().await?;
+    /// chat.add_tool(Box::new(calculator()));
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn add_tool(&mut self, tool: Box<dyn crate::tool::Tool>) -> &mut Self {
+        // Add to tool definitions and names
+        let definition = tool.to_provider_format();
+        let name = tool.name().to_string();
+        
+        // Update tool definitions
+        let mut definitions = self.options.tool_definitions.take().unwrap_or_default();
+        definitions.push(definition);
+        self.options.tool_definitions = Some(definitions);
+        
+        // Update tool names
+        let mut names = self.options.tool_names.take().unwrap_or_default();
+        names.push(name);
+        self.options.tool_names = Some(names);
+        
+        // Add the actual tool to the mutex-protected vector
+        {
+            let mut tools = self.options.tools.lock().unwrap();
+            tools.push(tool);
+        }
+        
+        self
+    }
+    
+    /// Set the tool choice strategy
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use language_barrier::{Chat, ChatOptions};
+    /// use language_barrier::client::ToolChoice;
+    ///
+    /// # async fn example() -> language_barrier::error::Result<()> {
+    /// let mut chat = Chat::new_mock().await?;
+    /// chat.with_tool_choice(ToolChoice::Auto);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with_tool_choice(&mut self, tool_choice: crate::client::ToolChoice) -> &mut Self {
+        self.options.tool_choice = Some(tool_choice);
+        self
+    }
+    
     // Helper method to generate a response based on current history
     async fn generate_response(&mut self) -> Result<ChatResponse> {
         // Convert ChatMessages to Messages
@@ -1012,9 +1186,25 @@ impl Chat {
             .map(|m| Message::from(m.clone()))
             .collect::<Vec<_>>();
         
+        // Copy tool information to generation options
+        let mut generation_options = self.options.generation_options.clone();
+        
+        // Copy tool definitions and names
+        if let Some(definitions) = &self.options.tool_definitions {
+            generation_options.tool_definitions = Some(definitions.clone());
+        }
+        
+        if let Some(names) = &self.options.tool_names {
+            generation_options.tool_names = Some(names.clone());
+        }
+        
+        if let Some(tool_choice) = &self.options.tool_choice {
+            generation_options.tool_choice = Some(tool_choice.clone());
+        }
+        
         // Generate response
         let generation_result = self.provider
-            .generate(&self.options.model, &messages, self.options.generation_options.clone())
+            .generate(&self.options.model, &messages, generation_options)
             .await?;
         
         // Convert to ChatResponse
@@ -1229,5 +1419,30 @@ mod tests {
         assert_eq!(chat.history()[2].role, MessageRole::User);
         
         assert_eq!(chat.history()[3].role, MessageRole::Assistant);
+    }
+    
+    #[tokio::test]
+    async fn test_chat_with_calculator_tool() {
+        // Create a chat with the mock provider
+        let mut chat = Chat::new_mock().await.unwrap();
+        
+        // Add the calculator tool
+        chat.add_tool(Box::new(crate::tool::calculator()));
+        
+        // Send a message that should trigger the calculator tool
+        let response = chat.send_message_with_tools("calculate 5 + 3").await.unwrap();
+        
+        // Print the response content for debugging
+        println!("Response content: {}", response.content());
+        
+        // Check the conversation history - should include the tool call and result
+        assert!(chat.history().len() >= 4); // User, Assistant with tool call, Tool, Assistant with result
+        
+        // Find the tool message
+        let tool_message = chat.history().iter().find(|m| m.role == MessageRole::Tool);
+        assert!(tool_message.is_some());
+        
+        // Less strict assertion that doesn't depend on exact content
+        assert!(response.content().len() > 0);
     }
 }

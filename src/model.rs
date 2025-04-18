@@ -18,6 +18,8 @@ pub enum ModelCapability {
     TextToSpeech,
     /// Embeddings generation
     Embeddings,
+    /// Tool/function calling
+    ToolCalling,
 }
 
 /// Represents a family of related models

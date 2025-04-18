@@ -31,6 +31,22 @@ pub enum Error {
     #[error("Context length exceeded: {0}")]
     ContextLengthExceeded(String),
 
+    /// Tool not found
+    #[error("Tool not found: {0}")]
+    ToolNotFound(String),
+
+    /// Invalid tool parameter
+    #[error("Invalid tool parameter: {0}")]
+    InvalidToolParameter(String),
+
+    /// Tool execution error
+    #[error("Tool execution error: {0}")]
+    ToolExecutionError(String),
+
+    /// Provider feature not supported
+    #[error("Provider feature not supported: {0}")]
+    ProviderFeatureNotSupported(String),
+
     /// Generic error
     #[error("{0}")]
     Other(String),

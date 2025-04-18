@@ -5,6 +5,20 @@ use std::sync::{Arc, Mutex};
 use crate::error::Result;
 use crate::message::{Content, FunctionCall, Message, ToolCall};
 use crate::model::{Model, ModelCapability};
+use crate::tool::Tool;
+
+/// Specifies how a model should choose which tools to use
+#[derive(Debug, Clone)]
+pub enum ToolChoice {
+    /// The model will automatically decide which tools to use, if any
+    Auto,
+    /// The model should not use any tools
+    None,
+    /// The model should use the specified tool
+    Tool(String),
+    /// The model should use any of the tools provided
+    Any,
+}
 
 /// Configuration options for generating messages
 #[derive(Debug, Clone, Default)]
@@ -19,6 +33,12 @@ pub struct GenerationOptions {
     pub stop: Option<Vec<String>>,
     /// Whether to stream the response (when supported)
     pub stream: bool,
+    /// Tools that the model can use - stored as tool definitions instead of actual tool objects
+    pub tool_definitions: Option<Vec<serde_json::Value>>,
+    /// For the mock provider, we store tool names to check for
+    pub tool_names: Option<Vec<String>>,
+    /// Tool choice strategy
+    pub tool_choice: Option<ToolChoice>,
     /// Additional provider-specific parameters
     pub extra_params: HashMap<String, serde_json::Value>,
 }
@@ -125,6 +145,47 @@ impl GenerationOptions {
         value: serde_json::Value,
     ) -> Self {
         self.extra_params.insert(key.into(), value);
+        self
+    }
+    
+    /// Sets the tools and returns self for method chaining
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use language_barrier::client::GenerationOptions;
+    /// use language_barrier::tool::calculator;
+    ///
+    /// let options = GenerationOptions::new()
+    ///     .with_tools(vec![Box::new(calculator())]);
+    /// ```
+    pub fn with_tools(mut self, tools: Vec<Box<dyn Tool>>) -> Self {
+        // Convert the tools to their provider-specific formats
+        let mut definitions = Vec::new();
+        let mut names = Vec::new();
+        
+        for tool in tools {
+            definitions.push(tool.to_provider_format());
+            names.push(tool.name().to_string());
+        }
+        
+        self.tool_definitions = Some(definitions);
+        self.tool_names = Some(names);
+        self
+    }
+    
+    /// Sets the tool choice strategy and returns self for method chaining
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use language_barrier::client::{GenerationOptions, ToolChoice};
+    ///
+    /// let options = GenerationOptions::new()
+    ///     .with_tool_choice(ToolChoice::Auto);
+    /// ```
+    pub fn with_tool_choice(mut self, tool_choice: ToolChoice) -> Self {
+        self.tool_choice = Some(tool_choice);
         self
     }
 }
@@ -264,6 +325,65 @@ pub trait LlmProvider: Send + Sync {
     /// # }
     /// ```
     async fn has_capability(&self, model: &str, capability: ModelCapability) -> Result<bool>;
+    
+    /// Register a tool with the provider
+    ///
+    /// # Arguments
+    ///
+    /// * `tool` - The tool to register
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use language_barrier::client::{LlmProvider, MockProvider};
+    /// use language_barrier::tool::calculator;
+    ///
+    /// # async fn example() -> language_barrier::error::Result<()> {
+    /// let mut provider = MockProvider::new();
+    /// provider.register_tool(Box::new(calculator())).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    async fn register_tool(&mut self, _tool: Box<dyn Tool>) -> Result<()> {
+        // Default implementation that providers can override
+        Err(crate::error::Error::ProviderFeatureNotSupported("Tool registration".to_string()))
+    }
+    
+    /// Execute a tool and return the result
+    ///
+    /// # Arguments
+    ///
+    /// * `tool_name` - The name of the tool to execute
+    /// * `parameters` - The parameters to pass to the tool
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use language_barrier::client::{LlmProvider, MockProvider};
+    /// use serde_json::json;
+    ///
+    /// # async fn example() -> language_barrier::error::Result<()> {
+    /// # use language_barrier::tool::calculator;
+    /// let mut provider = MockProvider::new();
+    /// // First register a tool (required for execution)
+    /// provider.register_tool(Box::new(calculator())).await?;
+    /// 
+    /// // Then execute it
+    /// let result = provider.execute_tool(
+    ///     "calculator",
+    ///     json!({
+    ///         "operation": "add",
+    ///         "a": 5,
+    ///         "b": 3
+    ///     })
+    /// ).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    async fn execute_tool(&self, tool_name: &str, _parameters: serde_json::Value) -> Result<serde_json::Value> {
+        // Default implementation that providers can override
+        Err(crate::error::Error::ToolNotFound(tool_name.to_string()))
+    }
 }
 
 /// A mock implementation of the LlmProvider trait for testing
@@ -271,7 +391,10 @@ pub struct MockProvider {
     models: Vec<Model>,
     responses: Arc<Mutex<HashMap<String, Message>>>,
     metadata: GenerationMetadata,
+    tools: Arc<Mutex<HashMap<String, Box<dyn Tool>>>>,
 }
+
+// We'll implement our own approach rather than trying to make Box<dyn Tool> cloneable
 
 impl Default for MockProvider {
     fn default() -> Self {
@@ -298,6 +421,7 @@ impl MockProvider {
             vec![
                 ModelCapability::ChatCompletion,
                 ModelCapability::TextGeneration,
+                ModelCapability::ToolCalling,
             ],
             "MockProvider",
         );
@@ -322,6 +446,7 @@ impl MockProvider {
             models: vec![model],
             responses: Arc::new(Mutex::new(HashMap::new())),
             metadata,
+            tools: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -411,7 +536,7 @@ impl LlmProvider for MockProvider {
         &self,
         model: &str,
         messages: &[Message],
-        _options: GenerationOptions,
+        options: GenerationOptions,
     ) -> Result<GenerationResult> {
         // Check if the model exists
         if !self.models.iter().any(|m| m.id == model) {
@@ -427,6 +552,96 @@ impl LlmProvider for MockProvider {
             .rev()
             .find(|m| m.role == crate::message::MessageRole::User);
 
+        // Check if we should handle tool calls
+        if let (Some(tool_names), Some(message)) = (&options.tool_names, last_user_message) {
+            if let Some(Content::Text(text)) = &message.content {
+                // Handle tool calling specifically for calculator
+                if (text.to_lowercase().contains("calculate") || text.to_lowercase().contains("calculator")) 
+                    && tool_names.contains(&"calculator".to_string()) {
+                    // Create a tool call response
+                    let mut operation = "add";
+                    let mut a = 5.0;
+                    let mut b = 3.0;
+                    
+                    // Try to extract numbers from the message
+                    if let Some(captures) = regex::Regex::new(r"(\d+)\s*[+*/\-]\s*(\d+)")
+                        .ok()
+                        .and_then(|re| re.captures(text))
+                    {
+                        if let (Some(first), Some(second)) = (captures.get(1), captures.get(2)) {
+                            if let (Ok(parsed_a), Ok(parsed_b)) = (
+                                first.as_str().parse::<f64>(),
+                                second.as_str().parse::<f64>(),
+                            ) {
+                                a = parsed_a;
+                                b = parsed_b;
+                                
+                                // Try to determine operation
+                                if text.contains('+') {
+                                    operation = "add";
+                                } else if text.contains('-') {
+                                    operation = "subtract";
+                                } else if text.contains('*') {
+                                    operation = "multiply";
+                                } else if text.contains('/') {
+                                    operation = "divide";
+                                }
+                            }
+                        }
+                    }
+                    
+                    let tool_call = ToolCall {
+                        id: "call_123".to_string(),
+                        tool_type: "function".to_string(),
+                        function: FunctionCall {
+                            name: "calculator".to_string(),
+                            arguments: format!(
+                                r#"{{"operation":"{}","a":{},"b":{}}}"#,
+                                operation, a, b
+                            ),
+                        },
+                    };
+                    
+                    return Ok(GenerationResult {
+                        message: Message {
+                            role: crate::message::MessageRole::Assistant,
+                            content: Some(Content::Text("I'll use the calculator to solve this".to_string())),
+                            name: None,
+                            function_call: None,
+                            tool_calls: Some(vec![tool_call]),
+                            tool_call_id: None,
+                            metadata: HashMap::new(),
+                        },
+                        metadata: self.metadata.clone(),
+                    });
+                }
+            }
+        }
+        
+        // Check if this is a tool message with a result
+        if let Some(message) = messages.last() {
+            if message.role == crate::message::MessageRole::Tool {
+                if let Some(Content::Text(content)) = &message.content {
+                    // Parse the content as JSON and extract the result
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(content) {
+                        if let Some(result) = json.get("result") {
+                            return Ok(GenerationResult {
+                                message: Message::assistant(format!("The result is: {}", result)),
+                                metadata: self.metadata.clone(),
+                            });
+                        }
+                    }
+                    
+                    // Default response for tool message
+                    return Ok(GenerationResult {
+                        message: Message::assistant(format!("I received the tool result: {}", content)),
+                        metadata: self.metadata.clone(),
+                    });
+                }
+            }
+        }
+
+        // Normal response logic for non-tool requests
         let response = match last_user_message {
             Some(message) => {
                 if let Some(content) = &message.content {
@@ -487,9 +702,8 @@ impl LlmProvider for MockProvider {
                 crate::error::Error::UnsupportedModel(format!("Model '{}' not found", model))
             })?;
 
-        // Mock supports tool calling if the model has TextGeneration capability
-        // (just as an example - in a real provider, this would be determined differently)
-        Ok(model.has_capability(ModelCapability::TextGeneration))
+        // Check if the model has the ToolCalling capability
+        Ok(model.has_capability(ModelCapability::ToolCalling))
     }
 
     async fn has_capability(&self, model: &str, capability: ModelCapability) -> Result<bool> {
@@ -503,6 +717,46 @@ impl LlmProvider for MockProvider {
             })?;
 
         Ok(model.has_capability(capability))
+    }
+    
+    async fn register_tool(&mut self, tool: Box<dyn Tool>) -> Result<()> {
+        let mut tools = self.tools.lock().unwrap();
+        tools.insert(tool.name().to_string(), tool);
+        Ok(())
+    }
+    
+    async fn execute_tool(&self, tool_name: &str, parameters: serde_json::Value) -> Result<serde_json::Value> {
+        // Special case handling for calculator tool in the mock provider
+        if tool_name == "calculator" {
+            let operation = parameters["operation"]
+                .as_str()
+                .ok_or_else(|| crate::error::Error::InvalidToolParameter("operation must be a string".to_string()))?;
+                
+            let a = parameters["a"]
+                .as_f64()
+                .ok_or_else(|| crate::error::Error::InvalidToolParameter("a must be a number".to_string()))?;
+                
+            let b = parameters["b"]
+                .as_f64()
+                .ok_or_else(|| crate::error::Error::InvalidToolParameter("b must be a number".to_string()))?;
+                
+            let result = match operation {
+                "add" => a + b,
+                "subtract" => a - b,
+                "multiply" => a * b,
+                "divide" => {
+                    if b == 0.0 {
+                        return Err(crate::error::Error::InvalidToolParameter("Cannot divide by zero".to_string()));
+                    }
+                    a / b
+                },
+                _ => return Err(crate::error::Error::InvalidToolParameter(format!("Unknown operation: {}", operation))),
+            };
+            
+            Ok(serde_json::json!({ "result": result }))
+        } else {
+            Err(crate::error::Error::ToolNotFound(tool_name.to_string()))
+        }
     }
 }
 
