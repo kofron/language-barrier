@@ -19,6 +19,6 @@ pub use compactor::{ChatHistoryCompactor, DropOldestCompactor};
 pub use error::{Error, Result};
 pub use executor::SingleRequestExecutor;
 pub use message::{Content, Message, MessageRole};
-pub use model::{Claude, ModelInfo};
+pub use model::{Claude, Gemini, ModelInfo};
 pub use secret::Secret;
 pub use token::TokenCounter;

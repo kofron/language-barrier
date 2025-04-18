@@ -47,3 +47,44 @@ impl ModelInfo for Claude {
         }
     }
 }
+
+/// Represents a Google Gemini model
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Gemini {
+    /// Gemini 1.5 Flash
+    Flash15,
+    /// Gemini 2.0 Flash
+    Flash20,
+    /// Gemini 2.0 Flash-Lite
+    Flash20Lite,
+    /// Gemini 2.5 Flash Preview
+    Flash25Preview,
+}
+
+impl ModelInfo for Gemini {
+    fn context_window(&self) -> usize {
+        // All Gemini Flash models support 1M token context
+        1_048_576
+    }
+
+    fn max_output_tokens(&self) -> usize {
+        match self {
+            Self::Flash15 => 8_192,
+            Self::Flash20 => 8_192,
+            Self::Flash20Lite => 8_192,
+            Self::Flash25Preview => 65_536,
+        }
+    }
+}
+
+// Implement the GeminiModelInfo trait from provider/gemini.rs
+impl crate::provider::gemini::GeminiModelInfo for Gemini {
+    fn gemini_model_id(&self) -> String {
+        match self {
+            Self::Flash15 => "gemini-1.5-flash",
+            Self::Flash20 => "gemini-2.0-flash",
+            Self::Flash20Lite => "gemini-2.0-flash-lite",
+            Self::Flash25Preview => "gemini-2.5-flash-preview-04-17",
+        }.to_string()
+    }
+}
