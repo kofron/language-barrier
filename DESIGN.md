@@ -394,6 +394,41 @@ These integration tests follow our core design principles:
 
 The tests serve as executable documentation, showing exactly how our internal message format maps to each provider's expected request format. This establishes a foundation for implementing and testing more advanced features like tool calling while ensuring we don't break the basic message functionality.
 
+#### 2025-04-18: Enhanced Anthropic Provider Implementation
+
+1. **Message Type Conversions**:
+   - Implemented bidirectional conversion between library Message types and Anthropic-specific types
+   - Used From/Into trait implementations for clean, idiomatic conversion
+   - Added support for multimodal content (text and images)
+   - Created proper mappings for all message roles
+
+2. **Request Payload Construction**:
+   - Implemented creation of fully-formed Anthropic API request payloads
+   - Properly handles system messages as separate parameter according to Anthropic's API requirements
+   - Converts Chat settings like max_tokens to appropriate Anthropic parameters
+   - Added support for temperature and sampling parameters
+   - Structured foundation for tool support
+
+3. **Response Handling**:
+   - Created full conversion from Anthropic response format to library Message types
+   - Properly captures token usage information as message metadata
+   - Handles both text responses and tool use appropriately
+   - Provides clean conversion for multipart responses
+
+4. **Testing**:
+   - Comprehensive unit tests for bidirectional conversion
+   - Test coverage for message types, content parts, and response handling
+   - Tests for complete request payload generation
+   - Verification of proper system message handling
+
+The implementation follows our core design principles:
+- **Type safety**: Strong types for all Anthropic API format structures
+- **Provider-agnostic API**: The provider seamlessly integrates with our generic abstraction
+- **Extensibility**: Design patterns make it easy to add more capabilities
+- **Testability**: Well-tested with high coverage
+
+The From/Into trait pattern we've established provides a clean, idiomatic way to handle conversions between our library's format and provider-specific formats. This pattern can be applied to other providers like OpenAI and Google, ensuring consistent implementation across the library.
+
 #### 2025-04-18: Model Parameters Update
 
 1. **Context Window and Output Token Limits**:
