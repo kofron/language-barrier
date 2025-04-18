@@ -66,6 +66,37 @@ The library is organized into the following components:
    - Support for common LLM parameters like temperature and top_p
    - Extensible through extra_params for provider-specific parameters
 
+#### 2024-04-17: Chat Interface Design
+
+1. **Chat Interface**: Created a high-level, user-friendly abstraction for LLM interactions:
+   - Provides a simple API for sending messages and receiving responses
+   - Manages conversation history automatically
+   - Supports function calling and tool usage workflows
+   - Handles different message types (user, assistant, system, function, tool)
+
+2. **Simplified Message Types**:
+   - Introduced `ChatMessage` as a more user-friendly representation of messages
+   - Automatic conversion between internal `Message` and user-facing `ChatMessage` types
+   - Support for displaying messages in a human-readable format
+   - Maintains compatibility with the underlying provider API
+
+3. **Response Handling**:
+   - `ChatResponse` type wraps the provider's response and adds convenience methods
+   - Easy access to common metadata like token usage
+   - Detection of function calls and tool calls
+   - Standardized format regardless of provider implementation
+
+4. **Configuration Options**:
+   - Chat-specific options separate from generation parameters
+   - Support for system messages to set conversation context
+   - History management with optional size limits to prevent context window overflow
+   - Ability to change models or parameters mid-conversation
+
+5. **Testing Support**:
+   - Built-in mock provider for testing chat functionality
+   - Direct integration with the mock provider ecosystem
+   - Comprehensive tests for all features including conversation management
+
 ## Future Directions
 
 1. **Streaming**: Support for streaming responses from LLMs.
