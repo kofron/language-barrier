@@ -293,6 +293,43 @@ These new components follow our core design principles:
 
 This redesign maintains compatibility with the existing provider implementations while providing a much more flexible and user-friendly interface. It better integrates the foundational components (TokenCounter, ChatHistoryCompactor) into the core functionality of the Chat client.
 
+#### 2025-04-18: Model Types and Transport Separation
+
+1. **Type-Safe Model Enums**:
+   - Introduced `ModelInfo` trait to abstract common model functionality
+   - Created type-safe enums for `AnthropicModel` and `GoogleModel`
+   - Each enum variant represents a specific model with its properties
+   - Maintained backwards compatibility with string-based model IDs
+   - Improved type safety by preventing invalid model specifications
+
+2. **Transport Visitor Pattern**:
+   - Separated HTTP transport logic from provider-specific conversion logic
+   - Created `TransportVisitor` trait as a base interface for transport implementations
+   - Specialized with `AnthropicTransportVisitor` and `GoogleTransportVisitor` for provider-specific operations
+   - Provider implementations accept visitors for actual API calls
+   - Implemented both HTTP and mock transport implementations
+
+3. **HTTP Transport Implementation**:
+   - Implemented full HTTP transport using reqwest
+   - Centralized error handling and response processing
+   - Created proper header management
+   - Reduced code duplication across providers
+
+4. **Mock Transport for Testing**:
+   - Implemented a fully functional mock transport
+   - Allows testing provider code without actual API calls
+   - Supports capturing requests for verification
+   - Enables customizable responses for different test scenarios
+
+5. **Key Benefits**:
+   - **Improved Type Safety**: Models are now strongly typed
+   - **Better Separation of Concerns**: Conversion logic separate from transport details
+   - **Enhanced Testability**: Mock transport makes testing easier
+   - **Reduced Code Duplication**: Common HTTP logic centralized
+   - **More Flexible Architecture**: Providers can focus on format conversion
+
+The introduction of the visitor pattern and type-safe model enums represents a significant architectural improvement. It maintains backward compatibility while paving the way for a cleaner, more maintainable, and more testable codebase.
+
 ## Future Directions
 
 1. **Streaming**: Support for streaming responses from LLMs.
@@ -305,6 +342,7 @@ This redesign maintains compatibility with the existing provider implementations
 8. **Additional Tools**: Implement more tools like web search, weather, etc.
 9. **Advanced History Compactors**: Implement more sophisticated history management strategies, such as summarization-based compaction.
 10. **Proper Tokenization**: Replace the naive token counter with proper model-specific tokenizers.
+11. **Full Transport Integration**: Complete the transport visitor pattern implementation for all providers.
 
 ## Implementation Notes
 

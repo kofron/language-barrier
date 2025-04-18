@@ -135,7 +135,7 @@ pub trait Tool: Send + Sync + Debug {
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Calculator;
 
 #[async_trait]

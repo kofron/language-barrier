@@ -58,7 +58,198 @@ impl fmt::Display for ModelFamily {
     }
 }
 
+/// Model that can be converted to a string ID for API requests
+pub trait ModelInfo: Send + Sync + fmt::Debug {
+    /// The model ID string that should be passed to the provider's API
+    fn model_id(&self) -> String;
+    
+    /// The name of the model for display purposes
+    fn name(&self) -> String;
+    
+    /// The family this model belongs to
+    fn family(&self) -> ModelFamily;
+    
+    /// Capabilities of this model
+    fn capabilities(&self) -> Vec<ModelCapability>;
+    
+    /// Context window size in tokens
+    fn context_window(&self) -> usize;
+    
+    /// Whether the model supports a specific capability
+    fn has_capability(&self, capability: ModelCapability) -> bool {
+        self.capabilities().contains(&capability)
+    }
+}
+
+/// Represents an Anthropic Claude model
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnthropicModel {
+    /// Claude 3 Opus (February 2024)
+    Opus3,
+    /// Claude 3 Sonnet (February 2024)
+    Sonnet3,
+    /// Claude 3.5 Sonnet (July 2024)
+    Sonnet35,
+    /// Claude 3.7 Sonnet (TBD 2025)
+    Sonnet37,
+    /// Claude 3 Haiku (March 2024)
+    Haiku3,
+    /// Claude 3.5 Haiku (TBD 2024)
+    Haiku35,
+    /// Claude 2.1
+    Claude21,
+    /// Claude 2.0
+    Claude20,
+    /// Claude Instant 1.2
+    ClaudeInstant12,
+}
+
+impl ModelInfo for AnthropicModel {
+    fn model_id(&self) -> String {
+        match self {
+            Self::Opus3 => "claude-3-opus-20240229".to_string(),
+            Self::Sonnet3 => "claude-3-sonnet-20240229".to_string(),
+            Self::Sonnet35 => "claude-3.5-sonnet-20240620".to_string(),
+            Self::Sonnet37 => "claude-3-7-sonnet-20250219".to_string(),
+            Self::Haiku3 => "claude-3-haiku-20240307".to_string(), 
+            Self::Haiku35 => "claude-3.5-haiku-20240307".to_string(),
+            Self::Claude21 => "claude-2.1".to_string(),
+            Self::Claude20 => "claude-2.0".to_string(),
+            Self::ClaudeInstant12 => "claude-instant-1.2".to_string(),
+        }
+    }
+    
+    fn name(&self) -> String {
+        match self {
+            Self::Opus3 => "Claude 3 Opus".to_string(),
+            Self::Sonnet3 => "Claude 3 Sonnet".to_string(),
+            Self::Sonnet35 => "Claude 3.5 Sonnet".to_string(),
+            Self::Sonnet37 => "Claude 3.7 Sonnet".to_string(),
+            Self::Haiku3 => "Claude 3 Haiku".to_string(),
+            Self::Haiku35 => "Claude 3.5 Haiku".to_string(),
+            Self::Claude21 => "Claude 2.1".to_string(),
+            Self::Claude20 => "Claude 2.0".to_string(),
+            Self::ClaudeInstant12 => "Claude Instant 1.2".to_string(),
+        }
+    }
+    
+    fn family(&self) -> ModelFamily {
+        ModelFamily::Claude
+    }
+    
+    fn capabilities(&self) -> Vec<ModelCapability> {
+        match self {
+            Self::Opus3 | Self::Sonnet3 | Self::Sonnet35 | Self::Sonnet37 | Self::Haiku3 | Self::Haiku35 => vec![
+                ModelCapability::ChatCompletion,
+                ModelCapability::TextGeneration,
+                ModelCapability::Vision,
+                ModelCapability::ToolCalling,
+            ],
+            Self::Claude21 | Self::Claude20 | Self::ClaudeInstant12 => vec![
+                ModelCapability::ChatCompletion,
+                ModelCapability::TextGeneration,
+            ],
+        }
+    }
+    
+    fn context_window(&self) -> usize {
+        match self {
+            Self::Opus3 | Self::Sonnet3 | Self::Sonnet35 | Self::Sonnet37 | Self::Haiku3 | Self::Haiku35 | Self::Claude21 => 200_000,
+            Self::Claude20 | Self::ClaudeInstant12 => 100_000,
+        }
+    }
+}
+
+/// Represents a Google Gemini model
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GoogleModel {
+    /// Gemini 1.5 Pro
+    Gemini15Pro,
+    /// Gemini 1.5 Flash
+    Gemini15Flash,
+    /// Gemini 1.5 Flash 8B (smaller parameter version)
+    Gemini15Flash8B,
+    /// Gemini 2 Flash
+    Gemini2Flash,
+    /// Gemini 2 Flash Lite
+    Gemini2FlashLite,
+    /// Gemini 2.5 Flash
+    Gemini25Flash,
+    /// Gemini 2.5 Pro
+    Gemini25Pro,
+    /// Gemini 1.0 Pro
+    Gemini10Pro,
+    /// Gemini 1.0 Pro Vision
+    Gemini10ProVision,
+    /// Gemini 1.0 Ultra
+    Gemini10Ultra,
+}
+
+impl ModelInfo for GoogleModel {
+    fn model_id(&self) -> String {
+        match self {
+            Self::Gemini15Pro => "gemini-1.5-pro".to_string(),
+            Self::Gemini15Flash => "gemini-1.5-flash".to_string(),
+            Self::Gemini15Flash8B => "gemini-1.5-flash-8b".to_string(),
+            Self::Gemini2Flash => "gemini-2-flash".to_string(),
+            Self::Gemini2FlashLite => "gemini-2-flash-lite".to_string(),
+            Self::Gemini25Flash => "gemini-2.5-flash".to_string(),
+            Self::Gemini25Pro => "gemini-2.5-pro".to_string(),
+            Self::Gemini10Pro => "gemini-1.0-pro".to_string(),
+            Self::Gemini10ProVision => "gemini-1.0-pro-vision".to_string(),
+            Self::Gemini10Ultra => "gemini-1.0-ultra".to_string(),
+        }
+    }
+    
+    fn name(&self) -> String {
+        match self {
+            Self::Gemini15Pro => "Gemini 1.5 Pro".to_string(),
+            Self::Gemini15Flash => "Gemini 1.5 Flash".to_string(),
+            Self::Gemini15Flash8B => "Gemini 1.5 Flash 8B".to_string(),
+            Self::Gemini2Flash => "Gemini 2 Flash".to_string(),
+            Self::Gemini2FlashLite => "Gemini 2 Flash Lite".to_string(),
+            Self::Gemini25Flash => "Gemini 2.5 Flash".to_string(),
+            Self::Gemini25Pro => "Gemini 2.5 Pro".to_string(),
+            Self::Gemini10Pro => "Gemini 1.0 Pro".to_string(),
+            Self::Gemini10ProVision => "Gemini 1.0 Pro Vision".to_string(),
+            Self::Gemini10Ultra => "Gemini 1.0 Ultra".to_string(),
+        }
+    }
+    
+    fn family(&self) -> ModelFamily {
+        ModelFamily::Gemini
+    }
+    
+    fn capabilities(&self) -> Vec<ModelCapability> {
+        match self {
+            Self::Gemini15Pro | Self::Gemini15Flash | Self::Gemini15Flash8B | 
+            Self::Gemini2Flash | Self::Gemini2FlashLite | 
+            Self::Gemini25Flash | Self::Gemini25Pro | 
+            Self::Gemini10Pro | Self::Gemini10Ultra => vec![
+                ModelCapability::ChatCompletion,
+                ModelCapability::TextGeneration,
+                ModelCapability::Vision,
+                ModelCapability::ToolCalling,
+            ],
+            Self::Gemini10ProVision => vec![
+                ModelCapability::ChatCompletion,
+                ModelCapability::TextGeneration,
+                ModelCapability::Vision,
+            ],
+        }
+    }
+    
+    fn context_window(&self) -> usize {
+        match self {
+            Self::Gemini15Pro | Self::Gemini15Flash | Self::Gemini15Flash8B => 1_000_000,
+            Self::Gemini2Flash | Self::Gemini2FlashLite | Self::Gemini25Flash | Self::Gemini25Pro => 2_000_000,
+            Self::Gemini10Pro | Self::Gemini10ProVision | Self::Gemini10Ultra => 32_768,
+        }
+    }
+}
+
 /// Represents a specific language model with its properties
+/// This generic model type is being maintained for backward compatibility
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Model {
     /// The unique identifier of the model
@@ -198,6 +389,26 @@ impl Model {
     }
 }
 
+// Allow conversion from ModelInfo types to a generic Model for backward compatibility
+impl<T: ModelInfo> From<T> for Model {
+    fn from(model_info: T) -> Self {
+        Self {
+            id: model_info.model_id(),
+            name: model_info.name(),
+            family: model_info.family(),
+            capabilities: model_info.capabilities(),
+            provider: match model_info.family() {
+                ModelFamily::Claude => "anthropic".to_string(),
+                ModelFamily::Gemini => "google".to_string(),
+                _ => "unknown".to_string(),
+            },
+            version: None,
+            context_window: Some(model_info.context_window()),
+            available: true,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -246,5 +457,47 @@ mod tests {
         assert_eq!(ModelFamily::GPT.to_string(), "GPT");
         assert_eq!(ModelFamily::Claude.to_string(), "Claude");
         assert_eq!(ModelFamily::Llama.to_string(), "Llama");
+    }
+    
+    #[test]
+    fn test_anthropic_model_info() {
+        let model = AnthropicModel::Sonnet3;
+        
+        assert_eq!(model.model_id(), "claude-3-sonnet-20240229");
+        assert_eq!(model.name(), "Claude 3 Sonnet");
+        assert_eq!(model.family(), ModelFamily::Claude);
+        assert!(model.has_capability(ModelCapability::ChatCompletion));
+        assert!(model.has_capability(ModelCapability::Vision));
+        assert!(model.has_capability(ModelCapability::ToolCalling));
+        assert_eq!(model.context_window(), 200_000);
+        
+        // Test conversion to generic Model
+        let generic_model: Model = model.into();
+        assert_eq!(generic_model.id, "claude-3-sonnet-20240229");
+        assert_eq!(generic_model.name, "Claude 3 Sonnet");
+        assert_eq!(generic_model.family, ModelFamily::Claude);
+        assert_eq!(generic_model.provider, "anthropic");
+        assert_eq!(generic_model.context_window, Some(200_000));
+    }
+    
+    #[test]
+    fn test_google_model_info() {
+        let model = GoogleModel::Gemini15Pro;
+        
+        assert_eq!(model.model_id(), "gemini-1.5-pro");
+        assert_eq!(model.name(), "Gemini 1.5 Pro");
+        assert_eq!(model.family(), ModelFamily::Gemini);
+        assert!(model.has_capability(ModelCapability::ChatCompletion));
+        assert!(model.has_capability(ModelCapability::Vision));
+        assert!(model.has_capability(ModelCapability::ToolCalling));
+        assert_eq!(model.context_window(), 1_000_000);
+        
+        // Test conversion to generic Model
+        let generic_model: Model = model.into();
+        assert_eq!(generic_model.id, "gemini-1.5-pro");
+        assert_eq!(generic_model.name, "Gemini 1.5 Pro");
+        assert_eq!(generic_model.family, ModelFamily::Gemini);
+        assert_eq!(generic_model.provider, "google");
+        assert_eq!(generic_model.context_window, Some(1_000_000));
     }
 }

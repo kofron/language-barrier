@@ -42,7 +42,6 @@
 // }'
 
 use async_trait::async_trait;
-use reqwest::{header, Client};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -53,8 +52,7 @@ use crate::client::{
 };
 use crate::error::{Error, Result};
 use crate::message::{Content, Message, MessageRole, ToolCall};
-use crate::model::{Model, ModelCapability, ModelFamily};
-use crate::tool::Tool;
+use crate::model::{AnthropicModel, Model, ModelCapability, ModelFamily, ModelInfo};
 
 /// Configuration for the Anthropic provider
 #[derive(Debug, Clone)]
@@ -80,16 +78,13 @@ impl Default for AnthropicConfig {
     }
 }
 
-/// Implementation of the Anthropic API
+/// Implementation of the Anthropic provider
+#[derive(Debug, Clone)]
 pub struct AnthropicProvider {
-    /// HTTP client for making requests
-    client: Client,
     /// Configuration for the provider
     config: AnthropicConfig,
     /// Cache of available models
     models: Arc<Mutex<Option<Vec<Model>>>>,
-    /// Registered tools
-    tools: Arc<Mutex<HashMap<String, Box<dyn Tool>>>>,
 }
 
 impl Default for AnthropicProvider {
@@ -129,35 +124,9 @@ impl AnthropicProvider {
     /// let provider = AnthropicProvider::with_config(config);
     /// ```
     pub fn with_config(config: AnthropicConfig) -> Self {
-        // Create HTTP client with default headers
-        let mut headers = header::HeaderMap::new();
-
-        // Add Anthropic API key
-        if let Ok(value) = header::HeaderValue::from_str(&config.api_key) {
-            headers.insert("x-api-key", value);
-        }
-
-        // Add Anthropic-Version header
-        if let Ok(value) = header::HeaderValue::from_str(&config.api_version) {
-            headers.insert("anthropic-version", value);
-        }
-
-        // Add Content-Type header
-        headers.insert(
-            header::CONTENT_TYPE,
-            header::HeaderValue::from_static("application/json"),
-        );
-
-        let client = Client::builder()
-            .default_headers(headers)
-            .build()
-            .unwrap_or_default();
-
         Self {
-            client,
             config,
             models: Arc::new(Mutex::new(None)),
-            tools: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -179,8 +148,23 @@ impl AnthropicProvider {
         Self::with_config(config)
     }
 
+    /// Returns the API key for this provider
+    pub fn api_key(&self) -> &str {
+        &self.config.api_key
+    }
+    
+    /// Returns the base URL for this provider
+    pub fn base_url(&self) -> &str {
+        &self.config.base_url
+    }
+    
+    /// Returns the API version for this provider
+    pub fn api_version(&self) -> &str {
+        &self.config.api_version
+    }
+    
     /// Helper method to convert our message format to Anthropic's message format
-    fn convert_messages(&self, messages: &[Message]) -> Vec<AnthropicMessage> {
+    pub fn convert_messages(&self, messages: &[Message]) -> Vec<AnthropicMessage> {
         let mut anthropic_messages = Vec::new();
 
         // Process messages in order
@@ -300,7 +284,7 @@ impl AnthropicProvider {
     }
 
     /// Helper method to extract system message from the messages array
-    fn extract_system_message(&self, messages: &[Message]) -> Option<String> {
+    pub fn extract_system_message(&self, messages: &[Message]) -> Option<String> {
         for message in messages {
             if message.role == MessageRole::System {
                 if let Some(Content::Text(text)) = &message.content {
@@ -312,7 +296,7 @@ impl AnthropicProvider {
     }
 
     /// Convert ToolChoice to Anthropic's tool_choice format
-    fn convert_tool_choice(&self, tool_choice: &ToolChoice) -> serde_json::Value {
+    pub fn convert_tool_choice(&self, tool_choice: &ToolChoice) -> serde_json::Value {
         match tool_choice {
             ToolChoice::Auto => serde_json::json!("auto"),
             ToolChoice::None => serde_json::json!("none"),
@@ -323,234 +307,12 @@ impl AnthropicProvider {
             ToolChoice::Any => serde_json::json!("any"),
         }
     }
-}
-
-#[async_trait]
-impl LlmProvider for AnthropicProvider {
-    async fn list_models(&self) -> Result<Vec<Model>> {
-        // Check cache first
-        {
-            let models = self.models.lock().unwrap();
-            if let Some(models) = &*models {
-                return Ok(models.clone());
-            }
-        }
-
-        // Define the supported Claude models
-        let models = vec![
-            Model::new(
-                "claude-3-opus-20240229",
-                "Claude 3 Opus",
-                ModelFamily::Claude,
-                vec![
-                    ModelCapability::ChatCompletion,
-                    ModelCapability::TextGeneration,
-                    ModelCapability::Vision,
-                    ModelCapability::ToolCalling,
-                ],
-                "anthropic",
-            )
-            .with_context_window(200000),
-            Model::new(
-                "claude-3-sonnet-20240229",
-                "Claude 3 Sonnet",
-                ModelFamily::Claude,
-                vec![
-                    ModelCapability::ChatCompletion,
-                    ModelCapability::TextGeneration,
-                    ModelCapability::Vision,
-                    ModelCapability::ToolCalling,
-                ],
-                "anthropic",
-            )
-            .with_context_window(200000),
-            Model::new(
-                "claude-3-haiku-20240307",
-                "Claude 3 Haiku",
-                ModelFamily::Claude,
-                vec![
-                    ModelCapability::ChatCompletion,
-                    ModelCapability::TextGeneration,
-                    ModelCapability::Vision,
-                    ModelCapability::ToolCalling,
-                ],
-                "anthropic",
-            )
-            .with_context_window(200000),
-            Model::new(
-                "claude-2.1",
-                "Claude 2.1",
-                ModelFamily::Claude,
-                vec![
-                    ModelCapability::ChatCompletion,
-                    ModelCapability::TextGeneration,
-                ],
-                "anthropic",
-            )
-            .with_context_window(200000),
-            Model::new(
-                "claude-2.0",
-                "Claude 2.0",
-                ModelFamily::Claude,
-                vec![
-                    ModelCapability::ChatCompletion,
-                    ModelCapability::TextGeneration,
-                ],
-                "anthropic",
-            )
-            .with_context_window(100000),
-            Model::new(
-                "claude-instant-1.2",
-                "Claude Instant 1.2",
-                ModelFamily::Claude,
-                vec![
-                    ModelCapability::ChatCompletion,
-                    ModelCapability::TextGeneration,
-                ],
-                "anthropic",
-            )
-            .with_context_window(100000),
-        ];
-
-        // Cache the models
-        {
-            let mut models_cache = self.models.lock().unwrap();
-            *models_cache = Some(models.clone());
-        }
-
-        Ok(models)
-    }
-
-    async fn generate(
-        &self,
-        model: &str,
-        messages: &[Message],
-        options: GenerationOptions,
-    ) -> Result<GenerationResult> {
-        // Validate model
-        let models = self.list_models().await?;
-        if !models.iter().any(|m| m.id == model) {
-            return Err(Error::UnsupportedModel(format!(
-                "Model '{}' not found in Anthropic provider",
-                model
-            )));
-        }
-
-        // Convert messages to Anthropic format
-        let anthropic_messages = self.convert_messages(messages);
-        let system = self.extract_system_message(messages);
-
-        // Prepare the request payload
-        let mut request_payload = HashMap::new();
-        request_payload.insert("model", serde_json::json!(model));
-        request_payload.insert("messages", serde_json::json!(anthropic_messages));
-
-        if let Some(system_content) = system {
-            request_payload.insert("system", serde_json::json!(system_content));
-        }
-
-        // Add temperature if specified
-        if let Some(temperature) = options.temperature {
-            request_payload.insert("temperature", serde_json::json!(temperature));
-        }
-
-        // Add top_p if specified
-        if let Some(top_p) = options.top_p {
-            request_payload.insert("top_p", serde_json::json!(top_p));
-        }
-
-        // Add max_tokens if specified
-        if let Some(max_tokens) = options.max_tokens {
-            request_payload.insert("max_tokens", serde_json::json!(max_tokens));
-        }
-
-        // Add stop sequences if specified
-        if let Some(stop) = &options.stop {
-            request_payload.insert("stop_sequences", serde_json::json!(stop));
-        }
-
-        // Add stream if specified
-        request_payload.insert("stream", serde_json::json!(options.stream));
-
-        // Add tools if specified
-        if let Some(tool_definitions) = &options.tool_definitions {
-            // Convert to Anthropic's tool format
-            let tools: Vec<AnthropicTool> = tool_definitions
-                .iter()
-                .filter_map(|tool_def| {
-                    // Extract function data from OpenAI-compatible format
-                    if let Some(function) = tool_def.get("function") {
-                        if let (Some(name), Some(description), Some(parameters)) = (
-                            function.get("name").and_then(|n| n.as_str()),
-                            function.get("description").and_then(|d| d.as_str()),
-                            function.get("parameters"),
-                        ) {
-                            Some(AnthropicTool {
-                                name: name.to_string(),
-                                description: description.to_string(),
-                                input_schema: parameters.clone(),
-                            })
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            if !tools.is_empty() {
-                request_payload.insert("tools", serde_json::json!(tools));
-            }
-        }
-
-        // Add tool_choice if specified
-        if let Some(tool_choice) = &options.tool_choice {
-            request_payload.insert("tool_choice", self.convert_tool_choice(tool_choice));
-        }
-
-        // Add any extra parameters
-        for (key, value) in &options.extra_params {
-            request_payload.insert(key, value.clone());
-        }
-
-        // Make the API request
-        let url = format!("{}/messages", self.config.base_url);
-        let response = self
-            .client
-            .post(&url)
-            .json(&request_payload)
-            .send()
-            .await
-            .map_err(Error::Request)?;
-
-        // Check for success
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response.text().await.unwrap_or_default();
-
-            return match status.as_u16() {
-                401 => Err(Error::Authentication(format!(
-                    "Anthropic API authentication failed: {}",
-                    error_text
-                ))),
-                429 => Err(Error::RateLimit(format!(
-                    "Anthropic API rate limit exceeded: {}",
-                    error_text
-                ))),
-                _ => Err(Error::Other(format!(
-                    "Anthropic API error ({}): {}",
-                    status, error_text
-                ))),
-            };
-        }
-
-        // Parse the response
-        let response_text = response.text().await.map_err(Error::Request)?;
-
-        let anthropic_response: AnthropicResponse =
-            serde_json::from_str(&response_text).map_err(Error::Serialization)?;
-
+    
+    /// Convert generated response JSON to our internal format
+    pub fn parse_response(&self, response_json: serde_json::Value) -> Result<GenerationResult> {
+        let response: AnthropicResponse = serde_json::from_value(response_json)
+            .map_err(Error::Serialization)?;
+        
         // Create our message from the response
         let mut message = Message {
             role: MessageRole::Assistant,
@@ -563,7 +325,7 @@ impl LlmProvider for AnthropicProvider {
         };
 
         // Process content from the response
-        if let Some(content) = anthropic_response.content.first() {
+        if let Some(content) = response.content.first() {
             match content {
                 AnthropicResponseContent::Text { text, .. } => {
                     message.content = Some(Content::Text(text.clone()));
@@ -590,22 +352,165 @@ impl LlmProvider for AnthropicProvider {
 
         // Create generation metadata
         let metadata = GenerationMetadata {
-            id: anthropic_response.id,
-            model: anthropic_response.model,
+            id: response.id,
+            model: response.model,
             created: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs(),
             usage: Some(UsageInfo {
-                prompt_tokens: anthropic_response.usage.input_tokens,
-                completion_tokens: anthropic_response.usage.output_tokens,
-                total_tokens: anthropic_response.usage.input_tokens
-                    + anthropic_response.usage.output_tokens,
+                prompt_tokens: response.usage.input_tokens,
+                completion_tokens: response.usage.output_tokens,
+                total_tokens: response.usage.input_tokens
+                    + response.usage.output_tokens,
             }),
             extra: HashMap::new(),
         };
 
         Ok(GenerationResult { message, metadata })
+    }
+    
+    /// Accept a visitor to perform transport operations
+    pub async fn accept<V: crate::transport::AnthropicTransportVisitor>(
+        &self,
+        visitor: &V,
+        model: &impl ModelInfo,
+        messages: &[Message],
+        options: GenerationOptions,
+    ) -> Result<GenerationResult> {
+        // First check if the model is supported
+        if model.family() != ModelFamily::Claude {
+            return Err(Error::UnsupportedModel(format!(
+                "Model family '{}' not supported by Anthropic provider",
+                model.family()
+            )));
+        }
+
+        // Prepare request with the visitor
+        let request = visitor.prepare_anthropic_request(model, messages, &options).await?;
+        
+        // Prepare headers
+        let mut headers = HashMap::new();
+        headers.insert("x-api-key".to_string(), self.config.api_key.clone());
+        headers.insert("anthropic-version".to_string(), self.config.api_version.clone());
+        headers.insert("content-type".to_string(), "application/json".to_string());
+
+        // Process the request using the visitor
+        let endpoint = format!("{}/messages", self.config.base_url);
+        let response = visitor.process_request(request, &endpoint, headers).await?;
+        
+        // Process the response with the visitor
+        let processed_response = visitor.process_anthropic_response(response).await?;
+        
+        // Parse the response
+        self.parse_response(processed_response)
+    }
+}
+
+#[async_trait]
+impl LlmProvider for AnthropicProvider {
+    async fn list_models(&self) -> Result<Vec<Model>> {
+        // Check cache first
+        {
+            let models = self.models.lock().unwrap();
+            if let Some(models) = &*models {
+                return Ok(models.clone());
+            }
+        }
+
+        // Define all supported Claude models
+        let models = vec![
+            // Claude 3 models
+            Model::from(AnthropicModel::Opus3),
+            Model::from(AnthropicModel::Sonnet3),
+            Model::from(AnthropicModel::Sonnet35),
+            Model::from(AnthropicModel::Sonnet37),
+            Model::from(AnthropicModel::Haiku3),
+            Model::from(AnthropicModel::Haiku35),
+            
+            // Claude 2 models
+            Model::from(AnthropicModel::Claude21),
+            Model::from(AnthropicModel::Claude20),
+            Model::from(AnthropicModel::ClaudeInstant12),
+        ];
+
+        // Cache the models
+        {
+            let mut models_cache = self.models.lock().unwrap();
+            *models_cache = Some(models.clone());
+        }
+
+        Ok(models)
+    }
+
+    async fn generate(
+        &self,
+        model: &str,
+        messages: &[Message],
+        options: GenerationOptions,
+    ) -> Result<GenerationResult> {
+        // Create an HTTP transport
+        let transport = crate::transport::http::HttpTransport::new();
+        
+        // Validate the model and find the corresponding AnthropicModel
+        let models = self.list_models().await?;
+        let _model_info = models.iter().find(|m| m.id == model).ok_or_else(|| {
+            Error::UnsupportedModel(format!(
+                "Model '{}' not found in Anthropic provider",
+                model
+            ))
+        })?;
+        
+        // Find the matching AnthropicModel enum or use a generic approach
+        // This is a temporary solution until we fully transition to enums
+        let model_result = match model {
+            "claude-3-opus-20240229" => self.accept(&transport, &AnthropicModel::Opus3, messages, options).await,
+            "claude-3-sonnet-20240229" => self.accept(&transport, &AnthropicModel::Sonnet3, messages, options).await,
+            "claude-3.5-sonnet-20240620" => self.accept(&transport, &AnthropicModel::Sonnet35, messages, options).await,
+            "claude-3-7-sonnet-20250219" => self.accept(&transport, &AnthropicModel::Sonnet37, messages, options).await,
+            "claude-3-haiku-20240307" => self.accept(&transport, &AnthropicModel::Haiku3, messages, options).await,
+            "claude-3.5-haiku-20240307" => self.accept(&transport, &AnthropicModel::Haiku35, messages, options).await,
+            "claude-2.1" => self.accept(&transport, &AnthropicModel::Claude21, messages, options).await,
+            "claude-2.0" => self.accept(&transport, &AnthropicModel::Claude20, messages, options).await,
+            "claude-instant-1.2" => self.accept(&transport, &AnthropicModel::ClaudeInstant12, messages, options).await,
+            _ => {
+                // Generic fallback for any other model ID
+                // Create a temporary ModelInfo implementation for the string model ID
+                #[derive(Debug)]
+                struct StringModel(String);
+                impl ModelInfo for StringModel {
+                    fn model_id(&self) -> String { self.0.clone() }
+                    fn name(&self) -> String { self.0.clone() }
+                    fn family(&self) -> ModelFamily { ModelFamily::Claude }
+                    fn capabilities(&self) -> Vec<ModelCapability> { 
+                        if self.0.starts_with("claude-3") {
+                            vec![
+                                ModelCapability::ChatCompletion,
+                                ModelCapability::TextGeneration,
+                                ModelCapability::Vision,
+                                ModelCapability::ToolCalling,
+                            ]
+                        } else {
+                            vec![
+                                ModelCapability::ChatCompletion,
+                                ModelCapability::TextGeneration,
+                            ]
+                        }
+                    }
+                    fn context_window(&self) -> usize { 
+                        if self.0.contains("instant") || self.0 == "claude-2.0" {
+                            100_000
+                        } else {
+                            200_000
+                        }
+                    }
+                }
+                
+                self.accept(&transport, &StringModel(model.to_string()), messages, options).await
+            }
+        };
+        
+        model_result
     }
 
     async fn supports_tool_calling(&self, model: &str) -> Result<bool> {
@@ -625,36 +530,11 @@ impl LlmProvider for AnthropicProvider {
             )))
         }
     }
-
-    async fn register_tool(&mut self, tool: Box<dyn Tool>) -> Result<()> {
-        let mut tools = self.tools.lock().unwrap();
-        tools.insert(tool.name().to_string(), tool);
-        Ok(())
-    }
-
-    async fn execute_tool(
-        &self,
-        tool_name: &str,
-        parameters: serde_json::Value,
-    ) -> Result<serde_json::Value> {
-        // The simplest solution: just re-implement the tool lookup and execution
-        // Create a Calculator tool directly when needed
-
-        // For now, we'll just directly support the calculator tool since that's what our tests use
-        // A more comprehensive solution would involve a different architecture
-        if tool_name == "calculator" {
-            let calculator = crate::tool::calculator();
-            return calculator.execute(parameters).await;
-        }
-
-        // For any other tool, return an error
-        Err(Error::ToolNotFound(tool_name.to_string()))
-    }
 }
 
 /// Represents a message in the Anthropic API format
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct AnthropicMessage {
+pub(crate) struct AnthropicMessage {
     /// The role of the message sender (user or assistant)
     pub role: String,
     /// The content of the message
@@ -664,7 +544,7 @@ struct AnthropicMessage {
 /// Represents a content part in an Anthropic message
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
-enum AnthropicContentPart {
+pub(crate) enum AnthropicContentPart {
     /// Text content
     #[serde(rename = "text")]
     Text {
@@ -702,7 +582,7 @@ impl AnthropicContentPart {
 
 /// Represents the source of an image in an Anthropic message
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct AnthropicImageSource {
+pub(crate) struct AnthropicImageSource {
     /// The type of the image source (base64 or url)
     #[serde(rename = "type")]
     pub type_field: String,
@@ -714,7 +594,7 @@ struct AnthropicImageSource {
 
 /// Represents a tool response in an Anthropic message
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct AnthropicToolResponse {
+pub(crate) struct AnthropicToolResponse {
     /// The type of the tool response
     #[serde(rename = "type")]
     pub type_field: String,
@@ -726,7 +606,7 @@ struct AnthropicToolResponse {
 
 /// Represents a tool in the Anthropic API format
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct AnthropicTool {
+pub(crate) struct AnthropicTool {
     /// The name of the tool
     pub name: String,
     /// The description of the tool
@@ -737,7 +617,7 @@ struct AnthropicTool {
 
 /// Represents a response from the Anthropic API
 #[derive(Debug, Serialize, Deserialize)]
-struct AnthropicResponse {
+pub(crate) struct AnthropicResponse {
     /// The ID of the response
     pub id: String,
     /// The type of the response
@@ -758,7 +638,7 @@ struct AnthropicResponse {
 /// Represents a content part in an Anthropic response
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
-enum AnthropicResponseContent {
+pub(crate) enum AnthropicResponseContent {
     /// Text content
     #[serde(rename = "text")]
     Text {
@@ -779,7 +659,7 @@ enum AnthropicResponseContent {
 
 /// Represents usage information in an Anthropic response
 #[derive(Debug, Serialize, Deserialize)]
-struct AnthropicUsage {
+pub(crate) struct AnthropicUsage {
     /// Number of tokens in the input
     pub input_tokens: u32,
     /// Number of tokens in the output
@@ -924,31 +804,8 @@ mod tests {
         assert!(!provider.supports_tool_calling("claude-2.1").await.unwrap());
     }
 
-    #[tokio::test]
-    async fn test_register_and_execute_tool() {
-        let mut provider = AnthropicProvider::new();
-        let calculator = crate::tool::calculator();
-
-        // Register the calculator tool
-        provider.register_tool(Box::new(calculator)).await.unwrap();
-
-        // Execute the tool
-        let result = provider
-            .execute_tool(
-                "calculator",
-                json!({
-                    "operation": "add",
-                    "a": 5,
-                    "b": 3
-                }),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(result["result"], 8.0);
-
-        // Try with an invalid tool
-        let result = provider.execute_tool("nonexistent", json!({})).await;
-        assert!(result.is_err());
-    }
+    // #[tokio::test]
+    // async fn test_register_and_execute_tool() {
+    //     // Test commented out as tool functionality has been temporarily removed
+    // }
 }

@@ -351,7 +351,7 @@ impl SingleTurnChatExecutor {
         let span = info_span!(
             "chat_run",
             messages = chat.history.len(),
-            tokens   = chat.tokens_used()
+            tokens = chat.tokens_used()
         );
 
         async move {
@@ -385,12 +385,7 @@ async fn main() {
     // Build chat with a custom compactor that keeps only the last 5 messages.
     struct KeepLastFive;
     impl ChatHistoryCompactor for KeepLastFive {
-        fn compact(
-            &mut self,
-            hist: &mut Vec<Message>,
-            counter: &mut TokenCounter,
-            _max: usize,
-        ) {
+        fn compact(&mut self, hist: &mut Vec<Message>, counter: &mut TokenCounter, _max: usize) {
             while hist.len() > 5 {
                 let m = hist.remove(0);
                 counter.subtract(&m.content);
@@ -427,13 +422,13 @@ async fn main() {
     println!("Response‑2: {resp2}");
 }
 
-/// --------------------------------------------------------------------------
-/// 10.  Testing notes (non‑executing, but compile‑time docs)
-/// --------------------------------------------------------------------------
-/// - **Provider unit‑tests** call an internal `build_request(&Chat)` helper and
-///   assert the JSON matches a golden fixture.
-/// - **Executor tests** inject a `MockTransport` implementing a `Transport`
-///   trait (not shown) so we can feed predetermined responses and assert on
-///   streaming, tool recursion, and span metadata.
-/// - **Tracing** can be captured with `tracing::collect::with_default` in tests
-///   to validate we emit `chat_run` and `tool_call` spans with correct fields.
+// --------------------------------------------------------------------------
+// 10.  Testing notes (non‑executing, but compile‑time docs)
+// --------------------------------------------------------------------------
+// - **Provider unit‑tests** call an internal `build_request(&Chat)` helper and
+//   assert the JSON matches a golden fixture.
+// - **Executor tests** inject a `MockTransport` implementing a `Transport`
+//   trait (not shown) so we can feed predetermined responses and assert on
+//   streaming, tool recursion, and span metadata.
+// - **Tracing** can be captured with `tracing::collect::with_default` in tests
+//   to validate we emit `chat_run` and `tool_call` spans with correct fields.

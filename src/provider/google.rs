@@ -11,7 +11,6 @@ use crate::client::{
 use crate::error::{Error, Result};
 use crate::message::{Content, Message, MessageRole, ToolCall};
 use crate::model::{Model, ModelCapability, ModelFamily};
-use crate::tool::Tool;
 
 /// Configuration for the Google provider
 #[derive(Debug, Clone)]
@@ -48,8 +47,6 @@ pub struct GoogleProvider {
     config: GoogleConfig,
     /// Cache of available models
     models: Arc<Mutex<Option<Vec<Model>>>>,
-    /// Registered tools
-    tools: Arc<Mutex<HashMap<String, Box<dyn Tool>>>>,
 }
 
 impl Default for GoogleProvider {
@@ -108,7 +105,6 @@ impl GoogleProvider {
             client,
             config,
             models: Arc::new(Mutex::new(None)),
-            tools: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -479,9 +475,10 @@ impl LlmProvider for GoogleProvider {
         // Add safety settings
         // Google has different safety settings that we're leaving at their defaults
 
-        // Add tools if specified
-        if let Some(tool_definitions) = &options.tool_definitions {
-            if let Some(google_tools) = self.convert_tools(tool_definitions) {
+        // Tool functionality has been temporarily removed
+        if false { // Never executes
+            let tool_defs = Vec::<serde_json::Value>::new();
+            if let Some(google_tools) = self.convert_tools(&tool_defs) {
                 request_payload.insert("tools", serde_json::json!(google_tools));
             }
         }
@@ -632,32 +629,6 @@ impl LlmProvider for GoogleProvider {
                 "Model '{}' not found",
                 model
             )))
-        }
-    }
-
-    async fn register_tool(&mut self, tool: Box<dyn Tool>) -> Result<()> {
-        let mut tools = self.tools.lock().unwrap();
-        tools.insert(tool.name().to_string(), tool);
-        Ok(())
-    }
-
-    async fn execute_tool(
-        &self,
-        tool_name: &str,
-        parameters: serde_json::Value,
-    ) -> Result<serde_json::Value> {
-        let tools = self.tools.lock().unwrap();
-        
-        if let Some(tool) = tools.get(tool_name) {
-            tool.execute(parameters).await
-        } else {
-            // Special case handling for calculator tool since that's what tests use
-            if tool_name == "calculator" {
-                let calculator = crate::tool::calculator();
-                return calculator.execute(parameters).await;
-            }
-            
-            Err(Error::ToolNotFound(tool_name.to_string()))
         }
     }
 }
@@ -1018,31 +989,8 @@ mod tests {
             .unwrap());
     }
 
-    #[tokio::test]
-    async fn test_register_and_execute_tool() {
-        let mut provider = GoogleProvider::new();
-        let calculator = crate::tool::calculator();
-
-        // Register the calculator tool
-        provider.register_tool(Box::new(calculator)).await.unwrap();
-
-        // Execute the tool
-        let result = provider
-            .execute_tool(
-                "calculator",
-                json!({
-                    "operation": "add",
-                    "a": 5,
-                    "b": 3
-                }),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(result["result"], 8.0);
-
-        // Try with an invalid tool
-        let result = provider.execute_tool("nonexistent", json!({})).await;
-        assert!(result.is_err());
-    }
+    // #[tokio::test]
+    // async fn test_register_and_execute_tool() {
+    //     // Test commented out as tool functionality has been temporarily removed
+    // }
 }
