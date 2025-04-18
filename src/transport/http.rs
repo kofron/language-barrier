@@ -1,12 +1,12 @@
-use std::collections::HashMap;
 use async_trait::async_trait;
 use reqwest::{Client, header};
+use std::collections::HashMap;
 
 use crate::error::{Error, Result};
 use crate::message::Message;
-use crate::client::GenerationOptions;
+
+use super::HTTPTransportVisitor;
 use crate::model::ModelInfo;
-use super::{TransportVisitor, AnthropicTransportVisitor, GoogleTransportVisitor};
 
 /// HTTP Transport implementation for making API requests to LLM providers
 #[derive(Debug, Clone)]
@@ -32,9 +32,7 @@ impl HttpTransport {
     /// let transport = HttpTransport::new();
     /// ```
     pub fn new() -> Self {
-        let client = Client::builder()
-            .build()
-            .unwrap_or_default();
+        let client = Client::builder().build().unwrap_or_default();
 
         Self { client }
     }
@@ -82,7 +80,8 @@ impl TransportVisitor for HttpTransport {
         }
 
         // Make the API request
-        let response = self.client
+        let response = self
+            .client
             .post(endpoint)
             .headers(header_map)
             .json(&payload)
@@ -113,8 +112,8 @@ impl TransportVisitor for HttpTransport {
 
         // Parse the response
         let response_text = response.text().await.map_err(Error::Request)?;
-        let response_json: serde_json::Value = serde_json::from_str(&response_text)
-            .map_err(|e| Error::Serialization(e))?;
+        let response_json: serde_json::Value =
+            serde_json::from_str(&response_text).map_err(|e| Error::Serialization(e))?;
 
         Ok(response_json)
     }
@@ -134,7 +133,7 @@ impl AnthropicTransportVisitor for HttpTransport {
             "messages": [],
             "max_tokens": options.max_tokens.unwrap_or(100),
         });
-        
+
         Ok(request)
     }
 
@@ -162,7 +161,7 @@ impl GoogleTransportVisitor for HttpTransport {
                 "maxOutputTokens": options.max_tokens.unwrap_or(100),
             }
         });
-        
+
         Ok(request)
     }
 
@@ -178,12 +177,12 @@ impl GoogleTransportVisitor for HttpTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_http_transport_creation() {
         let transport = HttpTransport::new();
         assert!(matches!(transport, HttpTransport { client: _ }));
-        
+
         let client = Client::new();
         let transport = HttpTransport::with_client(client);
         assert!(matches!(transport, HttpTransport { client: _ }));

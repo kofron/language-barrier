@@ -359,6 +359,75 @@ The introduction of the visitor pattern and type-safe model enums represents a s
 
 This refactoring simplifies the provider implementation while maintaining the same functionality. By leveraging the `ModelInfo` trait and model enums more directly, we've reduced code complexity and improved the architecture's clarity. The changes make the codebase more maintainable and set a foundation for future improvements in model management.
 
+#### 2025-04-18: Provider Integration Testing
+
+1. **Request Format Verification**:
+   - Implemented integration tests to verify that providers correctly format requests according to their respective API specifications
+   - Created tests that capture and analyze the exact JSON payloads sent to the API
+   - Ensured that message format conversion follows each provider's requirements
+   - Validated proper handling of system messages, user messages, and assistant messages
+   - Confirmed correct implementation of content formatting, especially for text content
+
+2. **Transport Visitor Pattern Testing**:
+   - Used the mock transport to capture and verify request payloads
+   - Tested the `prepare_*_request` methods to ensure they generate correctly formatted requests
+   - Confirmed that model IDs, message content, and generation options are properly reflected in requests
+   - Tested the visitor pattern implementation to ensure proper separation of concerns
+   - Established a foundation for later testing of tool/function calling capabilities
+
+3. **Provider-Specific Verification**:
+   - For Anthropic: Verified proper message array format, content parts structure, and model specification
+   - For Google: Verified contents array format, parts structure, and generation configuration
+   - Ensured each provider correctly converts internal message format to provider-specific format
+   - Tested edge cases like empty messages and system messages
+
+4. **Foundation for Tool Testing**:
+   - Created tests that can be extended to include tool and function calling
+   - Established patterns for verifying tool specification in requests
+   - Set up structure to verify tool response handling when implemented
+
+These integration tests follow our core design principles:
+- **Provider-agnostic API**: Tests verify that our common message format translates correctly to provider-specific formats
+- **Type safety**: Leverage Rust's type system to catch format errors at compile time
+- **Testability**: Mock transport enables verification without actual API calls
+- **Error handling**: Tests verify proper error cases and response handling
+
+The tests serve as executable documentation, showing exactly how our internal message format maps to each provider's expected request format. This establishes a foundation for implementing and testing more advanced features like tool calling while ensuring we don't break the basic message functionality.
+
+#### 2025-04-18: Model Parameters Update
+
+1. **Context Window and Output Token Limits**:
+   - Updated all model implementations with accurate context window sizes based on official documentation
+   - Added proper max output token values for both Anthropic and Google models
+   - Incorporated special case handling for Claude 3.7 Sonnet's extended thinking mode (128K tokens vs standard 64K)
+   - Standardized the naming and structure of model enums
+
+2. **Implementation Details**:
+   - **Anthropic Models**:
+     - Context Windows: All Claude 3 models have 200K token context windows, while older models have 100K
+     - Output Tokens: Most Claude models have 4096 max output tokens
+     - Special Case: Claude 3.7 Sonnet has 64K default output tokens, and 128K with extended thinking mode 
+   - **Google Models**:
+     - Context Windows: Gemini 1.5/2.0/2.5 models have massive 1M-2M token context windows
+     - Gemini 1.0 models have smaller 32K token context windows
+     - Output Tokens: Most Google models support 8192 output tokens
+     - Exceptions: Gemini 1.0 Pro Vision (4096) and Gemini 2 Flash Lite (2048)
+
+3. **Benefits of the Update**:
+   - More accurate token usage predictions and constraints
+   - Better handling of model-specific limitations
+   - Improved user experience through appropriate context window management
+   - Support for extended output capabilities where available
+
+This update ensures our model representations accurately reflect the capabilities and constraints of each model according to the official documentation from Anthropic and Google. The implementation now properly handles edge cases like Claude 3.7's extended thinking mode and accurately represents the varying capabilities across different model versions.
+
+Additionally, we've restructured the codebase to move client-related functionality to the provider module for better organization and to reflect the fact that providers are the main interaction point with LLM APIs. We've also:
+
+1. Made ModelInfo extend the Model trait to ensure all models implement both the basic identification methods and the capability-specific methods
+2. Added struct variants to model enums where needed, such as Sonnet35Version and the extended thinking flag for Sonnet37
+3. Implemented a more flexible provider hierarchy with appropriate traits and implementations
+4. Created stub implementations of mock providers to support testing
+
 ## Future Directions
 
 1. **Streaming**: Support for streaming responses from LLMs.
@@ -372,6 +441,7 @@ This refactoring simplifies the provider implementation while maintaining the sa
 9. **Advanced History Compactors**: Implement more sophisticated history management strategies, such as summarization-based compaction.
 10. **Proper Tokenization**: Replace the naive token counter with proper model-specific tokenizers.
 11. **Full Transport Integration**: Complete the transport visitor pattern implementation for all providers.
+12. **Comprehensive Integration Testing**: Expand integration tests to cover all features including tools, streaming, and vision capabilities.
 
 ## Implementation Notes
 

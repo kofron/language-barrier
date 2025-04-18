@@ -402,11 +402,7 @@ impl Message {
     /// let msg = Message::user("Hello")
     ///     .with_metadata("priority", json!(5));
     /// ```
-    pub fn with_metadata(
-        mut self,
-        key: impl Into<String>,
-        value: serde_json::Value,
-    ) -> Self {
+    pub fn with_metadata(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
         self.metadata.insert(key.into(), value);
         self
     }
@@ -439,7 +435,7 @@ mod tests {
         ]);
         let serialized = serde_json::to_string(&parts_content).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&serialized).unwrap();
-        
+
         assert!(parsed.is_array());
         assert_eq!(parsed.as_array().unwrap().len(), 2);
     }
@@ -449,17 +445,17 @@ mod tests {
         let msg = Message::user("Hello, world!");
         let serialized = serde_json::to_string(&msg).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&serialized).unwrap();
-        
+
         assert_eq!(parsed["role"], "user");
         assert_eq!(parsed["content"], "Hello, world!");
-        
+
         // Test with metadata
         let msg = Message::user("Hello")
             .with_metadata("priority", json!(5))
             .with_name("John");
         let serialized = serde_json::to_string(&msg).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&serialized).unwrap();
-        
+
         assert_eq!(parsed["role"], "user");
         assert_eq!(parsed["name"], "John");
         assert_eq!(parsed["priority"], 5);
