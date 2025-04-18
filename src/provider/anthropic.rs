@@ -80,9 +80,8 @@ impl Default for AnthropicProvider {
     }
 }
 
-#[async_trait]
 impl HTTPProvider<Claude> for AnthropicProvider {
-    async fn accept(&self, chat: Chat<Claude>) -> Result<Request> {
+    fn accept(&self, chat: Chat<Claude>) -> Result<Request> {
         let url = Url::parse(format!("{}/messages", self.config.base_url).as_str())?;
         let mut request = Request::new(Method::POST, url);
 
@@ -121,32 +120,9 @@ impl HTTPProvider<Claude> for AnthropicProvider {
         Ok(request)
     }
 
-    async fn parse(&self, response: Response) -> Result<Message> {
-        // Check if the response was successful
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_text = response.text().await.map_err(Error::Request)?;
-
-            return match status.as_u16() {
-                401 => Err(Error::Authentication(format!(
-                    "Anthropic API authentication failed: {}",
-                    error_text
-                ))),
-                429 => Err(Error::RateLimit(format!(
-                    "Anthropic API rate limit exceeded: {}",
-                    error_text
-                ))),
-                _ => Err(Error::Other(format!(
-                    "Anthropic API error ({}): {}",
-                    status, error_text
-                ))),
-            };
-        }
-
-        // Parse the response body
-        let response_text = response.text().await.map_err(Error::Request)?;
+    fn parse(&self, raw_response_text: String) -> Result<Message> {
         let anthropic_response: AnthropicResponse =
-            serde_json::from_str(&response_text).map_err(Error::Serialization)?;
+            serde_json::from_str(&raw_response_text).map_err(Error::Serialization)?;
 
         // Convert to our message format using the existing From implementation
         let message = Message::from(&anthropic_response);
@@ -645,5 +621,45 @@ mod tests {
         // Check metadata
         assert_eq!(lib_msg.metadata["input_tokens"], 5);
         assert_eq!(lib_msg.metadata["output_tokens"], 15);
+    }
+
+    #[test]
+    fn test_headers() {
+        // This test may fail due to transitional state in the codebase
+        // We'll implement it properly but comment it out for now
+
+        // Create a provider with a test API key
+        let config = AnthropicConfig {
+            api_key: "test-api-key".to_string(),
+            base_url: "https://api.anthropic.com/v1".to_string(),
+            api_version: "2023-06-01".to_string(),
+        };
+        let provider = AnthropicProvider::with_config(config);
+
+        // Create a chat with a model
+        let model = Claude::Sonnet37 {
+            use_extended_thinking: false,
+        };
+        let mut chat = Chat::new(model)
+            .with_system_prompt("You are a helpful assistant.")
+            .with_max_output_tokens(1024);
+
+        // Add some messages
+        chat.push_message(Message::user("Hello, how are you?"));
+        chat.push_message(Message::assistant("I'm doing well, thank you for asking!"));
+        chat.push_message(Message::user("Can you help me with a question?"));
+
+        // Create the request
+        let request = provider.accept(chat).unwrap();
+
+        // Verify the request
+        assert_eq!(request.method(), "POST");
+        assert_eq!(
+            request.url().as_str(),
+            "https://api.anthropic.com/v1/messages"
+        );
+        assert_eq!(request.headers()["x-api-key"], "test-api-key");
+        assert_eq!(request.headers()["anthropic-version"], "2023-06-01");
+        assert_eq!(request.headers()["Content-Type"], "application/json");
     }
 }

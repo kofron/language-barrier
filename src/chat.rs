@@ -1,10 +1,11 @@
 use crate::ModelInfo;
 use crate::compactor::{ChatHistoryCompactor, DropOldestCompactor};
 use crate::message::{Content, Message};
+
 use crate::token::TokenCounter;
 
 /// The main Chat client that users will interact with
-pub struct Chat<M> {
+pub struct Chat<M: ModelInfo> {
     // Immutable after construction
     pub model: M,
 
@@ -20,7 +21,7 @@ pub struct Chat<M> {
 
 impl<M> Chat<M>
 where
-    M: Clone + Send + Sync + 'static,
+    M: ModelInfo,
 {
     /// Creates a new Chat instance with a model and provider
     pub fn new(model: M) -> Self {
