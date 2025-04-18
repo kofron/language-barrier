@@ -9,5 +9,6 @@ pub mod anthropic;
 /// An HTTPProvider can take a chat and turn it into an http request.
 pub trait HTTPProvider<M: ModelInfo> {
     fn accept(&self, chat: Chat<M>) -> Result<Request>;
+    
     fn parse(&self, raw_response_text: String) -> Result<Message>;
 }

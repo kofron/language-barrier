@@ -37,9 +37,9 @@ impl ModelInfo for Claude {
 
     fn max_output_tokens(&self) -> usize {
         match self {
-            Self::Sonnet35 { version } => 8192,
+            Self::Sonnet35 { version: _ } => 8192,
             Self::Sonnet37 {
-                use_extended_thinking,
+                use_extended_thinking: _,
             } => 64_000,
             Self::Haiku35 => 8192,
             Self::Haiku3 => 4096,

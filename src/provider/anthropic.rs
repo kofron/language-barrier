@@ -3,10 +3,10 @@ use crate::message::{Content, ContentPart, Message, MessageRole};
 use crate::model::Sonnet35Version;
 use crate::provider::HTTPProvider;
 use crate::{Chat, Claude};
-use async_trait::async_trait;
-use reqwest::{Method, Request, Response, Url};
+use reqwest::{Method, Request, Url};
 use serde::{Deserialize, Serialize};
 use std::env;
+use tracing::{debug, error, info, instrument, trace, warn};
 
 /// Configuration for the Anthropic provider
 #[derive(Debug, Clone)]
@@ -48,10 +48,15 @@ impl AnthropicProvider {
     ///
     /// let provider = AnthropicProvider::new();
     /// ```
+    #[instrument(level = "debug")]
     pub fn new() -> Self {
-        Self {
-            config: AnthropicConfig::default(),
-        }
+        info!("Creating new AnthropicProvider with default configuration");
+        let config = AnthropicConfig::default();
+        debug!("API key set: {}", !config.api_key.is_empty());
+        debug!("Base URL: {}", config.base_url);
+        debug!("API version: {}", config.api_version);
+
+        Self { config }
     }
 
     /// Creates a new AnthropicProvider with custom configuration
@@ -69,7 +74,13 @@ impl AnthropicProvider {
     ///
     /// let provider = AnthropicProvider::with_config(config);
     /// ```
+    #[instrument(skip(config), level = "debug")]
     pub fn with_config(config: AnthropicConfig) -> Self {
+        info!("Creating new AnthropicProvider with custom configuration");
+        debug!("API key set: {}", !config.api_key.is_empty());
+        debug!("Base URL: {}", config.base_url);
+        debug!("API version: {}", config.api_version);
+
         Self { config }
     }
 }
@@ -82,94 +93,195 @@ impl Default for AnthropicProvider {
 
 impl HTTPProvider<Claude> for AnthropicProvider {
     fn accept(&self, chat: Chat<Claude>) -> Result<Request> {
-        let url = Url::parse(format!("{}/messages", self.config.base_url).as_str())?;
+        info!("Creating request for Claude model: {:?}", chat.model);
+        debug!("Messages in chat history: {}", chat.history.len());
+
+        let url_str = format!("{}/messages", self.config.base_url);
+        debug!("Parsing URL: {}", url_str);
+        let url = match Url::parse(&url_str) {
+            Ok(url) => {
+                debug!("URL parsed successfully: {}", url);
+                url
+            }
+            Err(e) => {
+                error!("Failed to parse URL '{}': {}", url_str, e);
+                return Err(e.into());
+            }
+        };
+
         let mut request = Request::new(Method::POST, url);
+        debug!("Created request: {} {}", request.method(), request.url());
 
         // Set headers
-        request.headers_mut().insert(
-            "x-api-key",
-            self.config
-                .api_key
-                .parse()
-                .map_err(|_| Error::Authentication("Invalid API key format".into()))?,
-        );
-        request.headers_mut().insert(
-            "Content-Type",
-            "application/json"
-                .parse()
-                .map_err(|_| Error::Other("Failed to set content type".into()))?,
-        );
-        request.headers_mut().insert(
-            "anthropic-version",
-            self.config
-                .api_version
-                .parse()
-                .map_err(|_| Error::Other("Invalid API version format".into()))?,
-        );
+        debug!("Setting request headers");
+        let api_key_header = match self.config.api_key.parse() {
+            Ok(header) => header,
+            Err(e) => {
+                error!("Invalid API key format: {}", e);
+                return Err(Error::Authentication("Invalid API key format".into()));
+            }
+        };
+
+        let content_type_header = match "application/json".parse() {
+            Ok(header) => header,
+            Err(e) => {
+                error!("Failed to set content type: {}", e);
+                return Err(Error::Other("Failed to set content type".into()));
+            }
+        };
+
+        let api_version_header = match self.config.api_version.parse() {
+            Ok(header) => header,
+            Err(e) => {
+                error!("Invalid API version format: {}", e);
+                return Err(Error::Other("Invalid API version format".into()));
+            }
+        };
+
+        request.headers_mut().insert("x-api-key", api_key_header);
+        request
+            .headers_mut()
+            .insert("Content-Type", content_type_header);
+        request
+            .headers_mut()
+            .insert("anthropic-version", api_version_header);
+
+        trace!("Request headers set: {:#?}", request.headers());
 
         // Create the request payload
-        let payload = self.create_request_payload(&chat)?;
+        debug!("Creating request payload");
+        let payload = match self.create_request_payload(&chat) {
+            Ok(payload) => {
+                debug!("Request payload created successfully");
+                trace!("Model: {}", payload.model);
+                trace!("Max tokens: {:?}", payload.max_tokens);
+                trace!("System prompt present: {}", payload.system.is_some());
+                trace!("Number of messages: {}", payload.messages.len());
+                payload
+            }
+            Err(e) => {
+                error!("Failed to create request payload: {}", e);
+                return Err(e);
+            }
+        };
 
         // Set the request body
-        *request.body_mut() = Some(
-            serde_json::to_vec(&payload)
-                .map_err(Error::Serialization)?
-                .into(),
-        );
+        debug!("Serializing request payload");
+        let body_bytes = match serde_json::to_vec(&payload) {
+            Ok(bytes) => {
+                debug!("Payload serialized successfully ({} bytes)", bytes.len());
+                bytes
+            }
+            Err(e) => {
+                error!("Failed to serialize payload: {}", e);
+                return Err(Error::Serialization(e));
+            }
+        };
+
+        *request.body_mut() = Some(body_bytes.into());
+        info!("Request created successfully");
 
         Ok(request)
     }
 
     fn parse(&self, raw_response_text: String) -> Result<Message> {
-        let anthropic_response: AnthropicResponse =
-            serde_json::from_str(&raw_response_text).map_err(Error::Serialization)?;
+        info!("Parsing response from Anthropic API");
+        trace!("Raw response: {}", raw_response_text);
+
+        debug!("Deserializing response JSON");
+        let anthropic_response = match serde_json::from_str::<AnthropicResponse>(&raw_response_text)
+        {
+            Ok(response) => {
+                debug!("Response deserialized successfully");
+                debug!("Response ID: {}", response.id);
+                debug!("Response model: {}", response.model);
+                debug!("Stop reason: {:?}", response.stop_reason);
+                debug!("Content parts: {}", response.content.len());
+                debug!("Input tokens: {}", response.usage.input_tokens);
+                debug!("Output tokens: {}", response.usage.output_tokens);
+                response
+            }
+            Err(e) => {
+                error!("Failed to deserialize response: {}", e);
+                error!("Raw response: {}", raw_response_text);
+                return Err(Error::Serialization(e));
+            }
+        };
 
         // Convert to our message format using the existing From implementation
+        debug!("Converting Anthropic response to Message");
         let message = Message::from(&anthropic_response);
+
+        info!("Response parsed successfully");
+        trace!("Message content: {:?}", message.content);
 
         Ok(message)
     }
 }
 
 impl AnthropicProvider {
+    #[instrument(level = "debug")]
     fn id_for_model(model: Claude) -> &'static str {
-        match model {
-            Claude::Sonnet37 { .. } => "sonnet-3-7-latest",
+        let model_id = match model {
+            Claude::Sonnet37 { .. } => "claude-3-7-sonnet-latest",
             Claude::Sonnet35 {
                 version: Sonnet35Version::V1,
-            } => "sonnet-3-5-1",
+            } => "claude-3-5-sonnet-20240620",
             Claude::Sonnet35 {
                 version: Sonnet35Version::V2,
-            } => "sonnet-3-5-2",
-            Claude::Opus3 => "opus-3",
-            Claude::Haiku3 => "haiku-3",
-            Claude::Haiku35 => "haiku-3-5",
-        }
+            } => "claude-3-5-sonnet-20241022",
+            Claude::Opus3 => "claude-3-opus-latest",
+            Claude::Haiku3 => "claude-3-haiku-20240307",
+            Claude::Haiku35 => "claude-3-5-haiku-latest",
+        };
+
+        debug!("Mapped Claude model to Anthropic model ID: {}", model_id);
+        model_id
     }
 
     /// Creates a request payload from a Chat object
     ///
     /// This method converts the Chat's messages and settings into an Anthropic-specific
     /// format for the API request.
+    #[instrument(skip(self, chat), level = "debug")]
     fn create_request_payload(&self, chat: &Chat<Claude>) -> Result<AnthropicRequest> {
+        info!("Creating request payload for chat with Claude model");
+        debug!("System prompt length: {}", chat.system_prompt.len());
+        debug!("Messages in history: {}", chat.history.len());
+        debug!("Max output tokens: {}", chat.max_output_tokens);
+
         // Convert system prompt if present
         let system = if !chat.system_prompt.is_empty() {
+            debug!("Including system prompt in request");
+            trace!("System prompt: {}", chat.system_prompt);
             Some(chat.system_prompt.clone())
         } else {
+            debug!("No system prompt provided");
             None
         };
 
         // Convert messages
+        debug!("Converting messages to Anthropic format");
         let messages: Vec<AnthropicMessage> = chat
             .history
             .iter()
             .filter(|msg| msg.role != MessageRole::System) // Filter out system messages as they go in system field
-            .map(AnthropicMessage::from)
+            .map(|msg| {
+                trace!("Converting message with role: {:?}", msg.role);
+                AnthropicMessage::from(msg)
+            })
             .collect();
 
+        debug!("Converted {} messages for the request", messages.len());
+
+        // Get model ID for the chat model
+        let model_id = Self::id_for_model(chat.model).to_string();
+        debug!("Using model ID: {}", model_id);
+
         // Create the request
+        debug!("Creating AnthropicRequest");
         let request = AnthropicRequest {
-            model: Self::id_for_model(chat.model).to_string(),
+            model: model_id,
             messages,
             system,
             max_tokens: Some(chat.max_output_tokens),
@@ -179,6 +291,7 @@ impl AnthropicProvider {
             tools: None, // We'll add tools support later
         };
 
+        info!("Request payload created successfully");
         Ok(request)
     }
 }
