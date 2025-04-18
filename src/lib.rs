@@ -7,13 +7,17 @@ pub mod error;
 pub mod message;
 pub mod model;
 pub mod provider;
-pub mod tool;
+pub mod secret;
+pub mod token;
+pub mod compactor;
 
 // Re-export the main types for convenient usage
-pub use chat::{Chat, ChatOptions, ChatMessage, ChatResponse};
+pub use chat::{Chat, ChatBuilder, ChatMessage, ChatResponse};
 pub use client::{LlmProvider, ToolChoice};
 pub use error::Error;
 pub use message::{Content, Message, MessageRole};
 pub use model::{Model, ModelCapability, ModelFamily};
 pub use provider::Provider;
-pub use tool::{Tool, calculator};
+pub use secret::Secret;
+pub use token::TokenCounter;
+pub use compactor::{ChatHistoryCompactor, DropOldestCompactor};

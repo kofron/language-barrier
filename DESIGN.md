@@ -230,6 +230,69 @@ Key differences from other providers:
 - Google has specific safety settings that are unique to their API
 - Google's API URL structure includes the model ID in the path
 
+#### 2025-04-18: Foundational Components Redesign and Tool Simplification
+
+1. **Secret<T> Type**:
+   - Created a dedicated wrapper type for sensitive information
+   - Prevents accidental leakage in logs and debug output
+   - Implements custom Debug and Display traits to hide secret values
+   - Intentionally does not implement Serialize to prevent accidental serialization
+   - Used for API keys and other credentials in provider configurations
+
+2. **TokenCounter**:
+   - Simple implementation for tracking token usage
+   - Uses a naive whitespace-based tokenization for simplicity
+   - Can be extended later with more sophisticated tokenizers
+   - Provides methods for observing, subtracting, and checking against token budgets
+   - Used with the ChatHistoryCompactor for conversation management
+
+3. **ChatHistoryCompactor Trait**:
+   - Strategy pattern for managing conversation history
+   - Allows different algorithms for trimming history when token budget is exceeded
+   - Maintains a clean separation of concerns between token counting and history management
+   - `DropOldestCompactor` provided as a default implementation that removes oldest messages first
+   - Designed to be extensible with other strategies (e.g., summarization)
+
+4. **Tool System Simplification**:
+   - Temporarily removed the tool system to simplify the refactoring process
+   - Will be reintroduced later with a cleaner, more idiomatic design
+   - Allowed us to focus on the core foundation components without dealing with object safety issues
+   - Future implementation will better separate tool interfaces from provider-specific implementations
+
+These new components follow our core design principles:
+- **Type safety**: Strong types with clear semantics
+- **Extensibility**: Easy to extend with additional implementations
+- **Testability**: Comprehensive unit tests for all components
+- **Error handling**: Clean handling of edge cases (like token budget exhaustion)
+- **Modularity**: Components are designed to be used independently and integrated smoothly
+
+#### 2025-04-18: Chat Interface Redesign
+
+1. **Generic Chat Implementation**:
+   - Completely redesigned Chat struct to be generic over model type and provider type
+   - Implemented with clean separation of core functionality and provider-specific features
+   - Simple fluent builder pattern for configuration
+   - Internal token tracking and history management with automatic compaction
+
+2. **Improved Provider Integration**:
+   - Type-safe specialization for the LlmProvider trait 
+   - Clear separation between generic chat functionality and provider-specific operations
+   - Token-aware message handling that automatically tracks conversation size
+
+3. **ChatBuilder Factory**:
+   - Convenient factory methods for creating chats with specific providers
+   - Handles provider creation and configuration with sensible defaults
+   - Makes it easy to get started with common providers (Anthropic, Google)
+   - Includes a mock builder for testing
+
+4. **Stream-Lined User Interface**:
+   - Simple methods for sending messages and getting responses
+   - Support for different message types (user, function, tool)
+   - Clean conversion between internal and external message formats
+   - Well-designed response type that maintains important metadata
+
+This redesign maintains compatibility with the existing provider implementations while providing a much more flexible and user-friendly interface. It better integrates the foundational components (TokenCounter, ChatHistoryCompactor) into the core functionality of the Chat client.
+
 ## Future Directions
 
 1. **Streaming**: Support for streaming responses from LLMs.
@@ -240,6 +303,8 @@ Key differences from other providers:
 6. **Local Models**: Support for running LLMs locally.
 7. **Additional Provider Implementations**: Implementations for other major providers like OpenAI.
 8. **Additional Tools**: Implement more tools like web search, weather, etc.
+9. **Advanced History Compactors**: Implement more sophisticated history management strategies, such as summarization-based compaction.
+10. **Proper Tokenization**: Replace the naive token counter with proper model-specific tokenizers.
 
 ## Implementation Notes
 
