@@ -319,8 +319,11 @@ impl GeminiProvider {
                         }
                     }
                 },
-                Message::Tool { content, .. } => {
-                    current_parts.push(GeminiPart::text(content.clone()));
+                Message::Tool { tool_call_id, content, .. } => {
+                    // For Gemini, include both the tool call ID and the content
+                    current_parts.push(GeminiPart::text(
+                        format!("Tool result for call {}: {}", tool_call_id, content)
+                    ));
                 }
             }
         }

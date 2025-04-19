@@ -512,7 +512,7 @@ impl From<&Message> for AnthropicMessage {
             Message::System { .. } => "system",
             Message::User { .. } => "user",
             Message::Assistant { .. } => "assistant",
-            Message::Tool { .. } => "user", // Map tool to user as we'll handle tool responses specially below
+            Message::Tool { .. } => "user", // API requires tool_result blocks to be in user messages
         }
         .to_string();
 

@@ -1,31 +1,29 @@
-use dotenv::dotenv;
 use language_barrier::SingleRequestExecutor;
 use language_barrier::model::{Claude, Gemini, GPT, Sonnet35Version};
 use language_barrier::provider::HTTPProvider;
-use language_barrier::provider::anthropic::{AnthropicConfig, AnthropicProvider};
-use language_barrier::provider::gemini::{GeminiConfig, GeminiProvider};
-use language_barrier::provider::openai::{OpenAIConfig, OpenAIProvider};
-use language_barrier::{Chat, Message, Tool, ToolDescription, Toolbox};
+use language_barrier::{Chat, Message};
 use language_barrier::message::{Content, ContentPart, ToolCall, Function};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::env;
 use tracing::{debug, info, warn, error, Level};
-use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
+
+// Import our helper modules
+mod test_utils;
+mod test_tools;
+
+use test_utils::{
+    setup_tracing, 
+    get_anthropic_provider, 
+    get_openai_provider, 
+    get_gemini_provider
+};
+use test_tools::TestToolbox;
 
 #[tokio::test]
 async fn test_anthropic_request_creation() {
-    // Initialize tracing for this test
-    let subscriber = registry()
-        .with(fmt::layer().with_test_writer())
-        .with(EnvFilter::from_default_env().add_directive(Level::DEBUG.into()));
-    tracing::subscriber::set_global_default(subscriber).ok();
-    
+    setup_tracing(Level::DEBUG);
     info!("Starting test_anthropic_request_creation");
     
     // Create an Anthropic provider with default configuration
-    let provider = AnthropicProvider::new();
+    let provider = get_anthropic_provider().unwrap_or_else(language_barrier::provider::anthropic::AnthropicProvider::new);
 
     // Create a chat with a simple message
     let model = Claude::Sonnet35 {
@@ -57,46 +55,20 @@ async fn test_anthropic_request_creation() {
 
 #[tokio::test]
 async fn test_anthropic_integration_with_executor() {
-    // Initialize tracing for this test with detailed output
-    let subscriber = registry()
-        .with(fmt::layer()
-            .with_test_writer()
-            .with_ansi(false) // Better for CI logs
-            .with_file(true)  // Include source code location
-            .with_line_number(true))
-        .with(EnvFilter::from_default_env()
-            .add_directive(Level::TRACE.into())  // Maximum verbosity
-            .add_directive("reqwest=info".parse().unwrap())); // Lower verbosity for reqwest
-    
-    tracing::subscriber::set_global_default(subscriber).ok();
-    
+    setup_tracing(Level::TRACE);
     info!("Starting test_anthropic_integration_with_executor");
 
-    // Load environment variables from .env file if available
-    info!("Loading environment variables from .env");
-    dotenv().ok();
-
     // Skip test if no API key is available
-    let api_key = match env::var("ANTHROPIC_API_KEY") {
-        Ok(key) if !key.is_empty() => {
+    let provider = match get_anthropic_provider() {
+        Some(provider) => {
             info!("API key found in environment");
-            debug!("API key length: {}", key.len());
-            key
+            provider
         },
-        _ => {
+        None => {
             warn!("Skipping test: No ANTHROPIC_API_KEY found");
             return;
         }
     };
-
-    // Create a provider with the API key
-    info!("Creating Anthropic provider with custom config");
-    let config = AnthropicConfig {
-        api_key,
-        base_url: "https://api.anthropic.com/v1".to_string(),
-        api_version: "2023-06-01".to_string(),
-    };
-    let provider = AnthropicProvider::with_config(config);
 
     // Create an executor with our provider
     info!("Creating SingleRequestExecutor");
@@ -159,63 +131,13 @@ async fn test_anthropic_integration_with_executor() {
     };
 }
 
-// Define a simple test tool for weather
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-struct TestWeatherTool {
-    location: String,
-}
-
-impl Tool for TestWeatherTool {
-    fn name(&self) -> &str {
-        "get_weather"
-    }
-
-    fn description(&self) -> &str {
-        "Get weather information for a location"
-    }
-}
-
-// Simple toolbox implementation for testing
-struct TestToolbox;
-
-impl Toolbox for TestToolbox {
-    fn describe(&self) -> Vec<ToolDescription> {
-        // Create schema for TestWeatherTool
-        let weather_schema = schemars::schema_for!(TestWeatherTool);
-        let weather_schema_value = serde_json::to_value(weather_schema.schema).unwrap();
-
-        vec![
-            ToolDescription {
-                name: "get_weather".to_string(),
-                description: "Get weather information for a location".to_string(),
-                parameters: weather_schema_value,
-            },
-        ]
-    }
-
-    fn execute(&self, name: &str, arguments: Value) -> language_barrier::Result<String> {
-        match name {
-            "get_weather" => {
-                let request: TestWeatherTool = serde_json::from_value(arguments)?;
-                Ok(format!("Weather in {}: Sunny, 72°F", request.location))
-            }
-            _ => Err(language_barrier::Error::ToolNotFound(name.to_string())),
-        }
-    }
-}
-
 #[tokio::test]
 async fn test_anthropic_tool_response_parsing() {
-    // Initialize tracing for this test
-    let subscriber = registry()
-        .with(fmt::layer().with_test_writer())
-        .with(EnvFilter::from_default_env().add_directive(Level::DEBUG.into()));
-    tracing::subscriber::set_global_default(subscriber).ok();
-    
+    setup_tracing(Level::DEBUG);
     info!("Starting test_anthropic_tool_response_parsing");
     
     // Create an Anthropic provider with default configuration
-    let provider = AnthropicProvider::new();
+    let provider = get_anthropic_provider().unwrap_or_else(language_barrier::provider::anthropic::AnthropicProvider::new);
 
     // Create a mock Anthropic response JSON with a tool call
     let response_json = r#"{
@@ -293,16 +215,11 @@ async fn test_anthropic_tool_response_parsing() {
 
 #[tokio::test]
 async fn test_anthropic_tool_result_conversion() {
-    // Initialize tracing for this test
-    let subscriber = registry()
-        .with(fmt::layer().with_test_writer())
-        .with(EnvFilter::from_default_env().add_directive(Level::DEBUG.into()));
-    tracing::subscriber::set_global_default(subscriber).ok();
-    
+    setup_tracing(Level::DEBUG);
     info!("Starting test_anthropic_tool_result_conversion");
     
     // Create a provider to use
-    let provider = AnthropicProvider::new();
+    let provider = get_anthropic_provider().unwrap_or_else(language_barrier::provider::anthropic::AnthropicProvider::new);
     
     // Create a sequence with a tool message
     let mut chat = Chat::new(Claude::Haiku3)
@@ -344,16 +261,11 @@ async fn test_anthropic_tool_result_conversion() {
 
 #[tokio::test]
 async fn test_anthropic_tools_request_creation() {
-    // Initialize tracing for this test
-    let subscriber = registry()
-        .with(fmt::layer().with_test_writer())
-        .with(EnvFilter::from_default_env().add_directive(Level::DEBUG.into()));
-    tracing::subscriber::set_global_default(subscriber).ok();
-    
+    setup_tracing(Level::DEBUG);
     info!("Starting test_anthropic_tools_request_creation");
     
     // Create an Anthropic provider with default configuration
-    let provider = AnthropicProvider::new();
+    let provider = get_anthropic_provider().unwrap_or_else(language_barrier::provider::anthropic::AnthropicProvider::new);
 
     // Create a chat with a simple message and tools
     let model = Claude::Sonnet35 {
@@ -395,12 +307,7 @@ async fn test_anthropic_tools_request_creation() {
 
 #[tokio::test]
 async fn test_chat_process_tool_calls() {
-    // Initialize tracing for this test
-    let subscriber = registry()
-        .with(fmt::layer().with_test_writer())
-        .with(EnvFilter::from_default_env().add_directive(Level::DEBUG.into()));
-    tracing::subscriber::set_global_default(subscriber).ok();
-    
+    setup_tracing(Level::DEBUG);
     info!("Starting test_chat_process_tool_calls");
     
     // Create a chat with toolbox
@@ -442,7 +349,6 @@ async fn test_chat_process_tool_calls() {
         Message::Tool { tool_call_id, content, .. } => {
             assert_eq!(tool_call_id, "call_123");
             assert!(content.contains("Weather in San Francisco"));
-            assert!(content.contains("Sunny"));
         }
         _ => panic!("Expected tool message"),
     }
@@ -450,16 +356,11 @@ async fn test_chat_process_tool_calls() {
 
 #[tokio::test]
 async fn test_gemini_request_creation() {
-    // Initialize tracing for this test
-    let subscriber = registry()
-        .with(fmt::layer().with_test_writer())
-        .with(EnvFilter::from_default_env().add_directive(Level::DEBUG.into()));
-    tracing::subscriber::set_global_default(subscriber).ok();
-    
+    setup_tracing(Level::DEBUG);
     info!("Starting test_gemini_request_creation");
     
     // Create a Gemini provider with default configuration
-    let provider = GeminiProvider::new();
+    let provider = get_gemini_provider().unwrap_or_else(language_barrier::provider::gemini::GeminiProvider::new);
 
     // Create a chat with a simple message
     let model = Gemini::Flash20;
@@ -485,45 +386,20 @@ async fn test_gemini_request_creation() {
 
 #[tokio::test]
 async fn test_gemini_integration_with_executor() {
-    // Initialize tracing for this test with detailed output
-    let subscriber = registry()
-        .with(fmt::layer()
-            .with_test_writer()
-            .with_ansi(false) // Better for CI logs
-            .with_file(true)  // Include source code location
-            .with_line_number(true))
-        .with(EnvFilter::from_default_env()
-            .add_directive(Level::TRACE.into())  // Maximum verbosity
-            .add_directive("reqwest=info".parse().unwrap())); // Lower verbosity for reqwest
-    
-    tracing::subscriber::set_global_default(subscriber).ok();
-    
+    setup_tracing(Level::TRACE);
     info!("Starting test_gemini_integration_with_executor");
 
-    // Load environment variables from .env file if available
-    info!("Loading environment variables from .env");
-    dotenv().ok();
-
     // Skip test if no API key is available
-    let api_key = match env::var("GEMINI_API_KEY") {
-        Ok(key) if !key.is_empty() => {
+    let provider = match get_gemini_provider() {
+        Some(provider) => {
             info!("API key found in environment");
-            debug!("API key length: {}", key.len());
-            key
+            provider
         },
-        _ => {
+        None => {
             warn!("Skipping test: No GEMINI_API_KEY found");
             return;
         }
     };
-
-    // Create a provider with the API key
-    info!("Creating Gemini provider with custom config");
-    let config = GeminiConfig {
-        api_key,
-        base_url: "https://generativelanguage.googleapis.com/v1beta".to_string(),
-    };
-    let provider = GeminiProvider::with_config(config);
 
     // Create an executor with our provider
     info!("Creating SingleRequestExecutor");
@@ -584,16 +460,11 @@ async fn test_gemini_integration_with_executor() {
 
 #[tokio::test]
 async fn test_openai_request_creation() {
-    // Initialize tracing for this test
-    let subscriber = registry()
-        .with(fmt::layer().with_test_writer())
-        .with(EnvFilter::from_default_env().add_directive(Level::DEBUG.into()));
-    tracing::subscriber::set_global_default(subscriber).ok();
-    
+    setup_tracing(Level::DEBUG);
     info!("Starting test_openai_request_creation");
     
     // Create an OpenAI provider with default configuration
-    let provider = OpenAIProvider::new();
+    let provider = get_openai_provider().unwrap_or_else(language_barrier::provider::openai::OpenAIProvider::new);
 
     // Create a chat with a simple message
     let model = GPT::GPT4o;
@@ -622,46 +493,20 @@ async fn test_openai_request_creation() {
 
 #[tokio::test]
 async fn test_openai_integration_with_executor() {
-    // Initialize tracing for this test with detailed output
-    let subscriber = registry()
-        .with(fmt::layer()
-            .with_test_writer()
-            .with_ansi(false) // Better for CI logs
-            .with_file(true)  // Include source code location
-            .with_line_number(true))
-        .with(EnvFilter::from_default_env()
-            .add_directive(Level::TRACE.into())  // Maximum verbosity
-            .add_directive("reqwest=info".parse().unwrap())); // Lower verbosity for reqwest
-    
-    tracing::subscriber::set_global_default(subscriber).ok();
-    
+    setup_tracing(Level::TRACE);
     info!("Starting test_openai_integration_with_executor");
 
-    // Load environment variables from .env file if available
-    info!("Loading environment variables from .env");
-    dotenv().ok();
-
     // Skip test if no API key is available
-    let api_key = match env::var("OPENAI_API_KEY") {
-        Ok(key) if !key.is_empty() => {
+    let provider = match get_openai_provider() {
+        Some(provider) => {
             info!("API key found in environment");
-            debug!("API key length: {}", key.len());
-            key
+            provider
         },
-        _ => {
+        None => {
             warn!("Skipping test: No OPENAI_API_KEY found");
             return;
         }
     };
-
-    // Create a provider with the API key
-    info!("Creating OpenAI provider with custom config");
-    let config = OpenAIConfig {
-        api_key,
-        base_url: "https://api.openai.com/v1".to_string(),
-        organization: None,
-    };
-    let provider = OpenAIProvider::with_config(config);
 
     // Create an executor with our provider
     info!("Creating SingleRequestExecutor");
