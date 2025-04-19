@@ -293,42 +293,171 @@ These new components follow our core design principles:
 
 This redesign maintains compatibility with the existing provider implementations while providing a much more flexible and user-friendly interface. It better integrates the foundational components (TokenCounter, ChatHistoryCompactor) into the core functionality of the Chat client.
 
-#### 2025-04-18: Model Types and Transport Separation
+#### 2025-04-18: Model Types and HTTP Provider Architecture
 
 1. **Type-Safe Model Enums**:
    - Introduced `ModelInfo` trait to abstract common model functionality
-   - Created type-safe enums for `AnthropicModel` and `GoogleModel`
+   - Created type-safe enums for `Claude`, `Gemini`, and `GPT` models
    - Each enum variant represents a specific model with its properties
    - Maintained backwards compatibility with string-based model IDs
    - Improved type safety by preventing invalid model specifications
 
-2. **Transport Visitor Pattern**:
-   - Separated HTTP transport logic from provider-specific conversion logic
-   - Created `TransportVisitor` trait as a base interface for transport implementations
-   - Specialized with `AnthropicTransportVisitor` and `GoogleTransportVisitor` for provider-specific operations
-   - Provider implementations accept visitors for actual API calls
-   - Implemented both HTTP and mock transport implementations
+2. **Provider and Executor Pattern**:
+   - Separated provider-specific conversion logic from HTTP transport
+   - Created `HTTPProvider<M>` trait that converts between chat objects and HTTP requests
+   - Provider implementations handle format-specific conversions
+   - Executor handles actual HTTP communication
 
-3. **HTTP Transport Implementation**:
-   - Implemented full HTTP transport using reqwest
-   - Centralized error handling and response processing
-   - Created proper header management
-   - Reduced code duplication across providers
+3. **HTTP Provider Implementation**:
+   - Each provider implements the `HTTPProvider<M>` trait:
+   ```rust
+   pub trait HTTPProvider<M: ModelInfo> {
+       fn accept(&self, chat: Chat<M>) -> Result<Request>;
+       fn parse(&self, raw_response_text: String) -> Result<Message>;
+   }
+   ```
+   - `accept()` method converts a chat into a provider-specific HTTP request
+   - `parse()` method converts a provider-specific response back into our message format
+   - Full separation of format conversion from HTTP transport
 
-4. **Mock Transport for Testing**:
-   - Implemented a fully functional mock transport
-   - Allows testing provider code without actual API calls
-   - Supports capturing requests for verification
-   - Enables customizable responses for different test scenarios
+4. **SingleRequestExecutor**:
+   - Handles the actual HTTP communication 
+   - Works with any `HTTPProvider` implementation
+   - Manages the reqwest HTTP client
+   - Standardizes error handling and logging
+   ```rust
+   pub struct SingleRequestExecutor<M: ModelInfo> {
+       provider: Box<dyn HTTPProvider<M>>,
+       client: Client,
+   }
+   
+   impl<M: ModelInfo> SingleRequestExecutor<M> {
+       pub fn new(provider: impl HTTPProvider<M> + 'static) -> Self { /*...*/ }
+       pub async fn send(&self, chat: Chat<M>) -> Result<Message> { /*...*/ }
+   }
+   ```
 
-5. **Key Benefits**:
-   - **Improved Type Safety**: Models are now strongly typed
-   - **Better Separation of Concerns**: Conversion logic separate from transport details
-   - **Enhanced Testability**: Mock transport makes testing easier
-   - **Reduced Code Duplication**: Common HTTP logic centralized
-   - **More Flexible Architecture**: Providers can focus on format conversion
+5. **Testing Support**:
+   - Easy to create mock providers that implement `HTTPProvider`
+   - Test-specific providers can simulate specific behaviors
+   - No actual HTTP calls needed for most tests
+   - Response formats can be directly tested
 
-The introduction of the visitor pattern and type-safe model enums represents a significant architectural improvement. It maintains backward compatibility while paving the way for a cleaner, more maintainable, and more testable codebase.
+6. **Key Benefits**:
+   - **Improved Type Safety**: Models are strongly typed and checked at compile time
+   - **Better Separation of Concerns**: Providers focus on format conversion, executor handles HTTP
+   - **Enhanced Testability**: Mock providers make testing easier and more reliable
+   - **Reduced Code Duplication**: Common HTTP logic centralized in the executor
+   - **More Flexible Architecture**: Easy to add new providers
+
+#### 2025-04-18: Understanding the HTTPProvider Pattern in Depth
+
+The `HTTPProvider` pattern is a core architectural component of Language Barrier. It enables a clean separation between provider-specific message formatting and the actual HTTP transport logic.
+
+##### The HTTPProvider Trait
+
+The trait is defined as:
+
+```rust
+pub trait HTTPProvider<M: ModelInfo> {
+    fn accept(&self, chat: Chat<M>) -> Result<Request>;
+    fn parse(&self, raw_response_text: String) -> Result<Message>;
+}
+```
+
+This simple interface hides significant complexity:
+
+1. **Generic Over Model Type**:
+   - Each provider implementation is generic over a specific model type (e.g., `AnthropicProvider` implements `HTTPProvider<Claude>`)
+   - This ensures type safety when matching providers with compatible models
+   - Prevents accidental use of a provider with an incompatible model
+
+2. **The `accept` Method**:
+   - Takes a `Chat<M>` object representing a complete conversation
+   - Converts it to a provider-specific HTTP request
+   - Handles all the format conversion details:
+     - Message format conversion
+     - System prompt placement
+     - Tool/function integration
+     - Generation parameters
+   - Returns a fully-formed `reqwest::Request` ready to be sent
+
+3. **The `parse` Method**:
+   - Takes a raw response string from the HTTP response
+   - Parses it according to the provider's specific response format
+   - Extracts the model's response, tool calls, token usage, etc.
+   - Converts to our unified `Message` format
+   - Handles error conditions in the response
+
+##### Provider Implementations
+
+Each provider implements this trait for its specific model type:
+
+```rust
+impl HTTPProvider<Claude> for AnthropicProvider {
+    fn accept(&self, chat: Chat<Claude>) -> Result<Request> {
+        // Convert to Anthropic's format
+        // Set Anthropic-specific headers
+        // Create and return the request
+    }
+    
+    fn parse(&self, raw_response_text: String) -> Result<Message> {
+        // Parse Anthropic's response format
+        // Convert to our Message type
+        // Return the parsed message
+    }
+}
+```
+
+This pattern allows each provider to handle its unique requirements:
+
+- **Anthropic**: System prompts are a separate field, tool calls use a specific format
+- **Google**: Uses "model" instead of "assistant" for role names
+- **OpenAI**: Has a different structure for function calling
+
+##### The Executor's Role
+
+The `SingleRequestExecutor` is responsible for:
+
+1. **HTTP Transport**: Managing the reqwest client and sending requests
+2. **Error Handling**: Standardizing error handling across providers
+3. **Logging**: Consistent logging of requests and responses
+4. **Response Management**: Converting HTTP responses back to domain objects
+
+```rust
+impl<M: ModelInfo> SingleRequestExecutor<M> {
+    pub async fn send(&self, chat: Chat<M>) -> Result<Message> {
+        // Convert chat to request using provider.accept()
+        // Send the HTTP request
+        // Get the response
+        // Parse with provider.parse()
+        // Return the parsed message
+    }
+}
+```
+
+##### Benefits of this Architecture
+
+1. **Separation of Concerns**:
+   - Providers focus only on format conversion
+   - Executor handles HTTP communication
+   - Chat manages conversation state
+
+2. **Type Safety**:
+   - Compile-time checks ensure providers are used with compatible models
+   - Generic bounds prevent misuse
+
+3. **Testability**:
+   - Easy to test format conversion in isolation
+   - Can mock responses without actual HTTP calls
+   - Integration tests can verify end-to-end behavior
+
+4. **Extensibility**:
+   - New providers can be added by implementing the trait
+   - Existing code remains unchanged
+   - Common HTTP logic is reused
+
+This architecture provides a solid foundation for the library, enabling clean abstractions and a consistent interface while handling the complexity of different provider formats behind the scenes.
 
 #### 2025-04-18: Provider Model Management Refactoring
 
@@ -505,6 +634,195 @@ Additionally, we've restructured the codebase to move client-related functionali
 This design achieves the goal of providing type safety for tools without sacrificing the simplicity of the core API. It uses Rust's strong type system to ensure that tool inputs and outputs are handled correctly, while keeping the message storage layer simple and efficient. The view pattern provides a clean abstraction that bridges the gap between the untyped storage and the typed tool handling.
 
 The implementation follows a principle of "pay for what you use" - users who don't need tools aren't burdened with the complexity, while those who do can opt into the type-safe layer. This balances flexibility, performance, and safety in an elegant way that leverages Rust's strengths.
+
+#### 2025-04-18: Tool System Design: A Deep Dive
+
+The tool system is one of the more sophisticated parts of the Language Barrier library. It's designed to provide type safety while maintaining flexibility and avoiding excessive generics throughout the codebase. This section offers a detailed explanation of the tool system architecture.
+
+##### Key Components
+
+1. **Tool Trait**:
+   ```rust
+   pub trait Tool where Self: JsonSchema {
+       fn name(&self) -> &str;
+       fn description(&self) -> &str;
+   }
+   ```
+   - Implemented by concrete tool request types
+   - Requires `JsonSchema` for automatic schema generation
+   - Provides name and description for LLM prompting
+   - Tools are *not* responsible for execution logic
+
+2. **Toolbox Trait**:
+   ```rust
+   pub trait Toolbox {
+       fn describe(&self) -> Vec<ToolDescription>;
+       fn execute(&self, name: &str, arguments: Value) -> Result<String>;
+   }
+   ```
+   - Non-generic, works with untyped JSON values
+   - Used for core message handling infrastructure
+   - Designed for easy serialization to LLM-specific formats
+   - All providers work with this trait directly
+
+3. **TypedToolbox Trait**:
+   ```rust
+   pub trait TypedToolbox<T: DeserializeOwned>: Toolbox {
+       fn parse_tool_call(&self, tool_call: &ToolCall) -> Result<T>;
+       fn execute_typed(&self, request: T) -> Result<String>;
+   }
+   ```
+   - Generic extension of `Toolbox` for type safety
+   - Type parameter `T` represents the union of all tool types (often an enum)
+   - Parses untyped tool calls into strongly typed representations
+   - Enables pattern matching on tool request types
+
+4. **ToolCallView**:
+   ```rust
+   pub struct ToolCallView<'a, T, TB>
+   where
+       T: DeserializeOwned,
+       TB: TypedToolbox<T>,
+   {
+       toolbox: &'a TB,
+       message: &'a Message,
+       _phantom: PhantomData<T>,
+   }
+   ```
+   - Provides a typed view over an untyped message
+   - Non-invasive - doesn't change core message structure
+   - Extracts strongly typed tool calls from messages
+   - Enables processing with pattern matching
+
+##### Implementation Pattern
+
+The typical implementation pattern follows these steps:
+
+1. **Define Tool Request Types**:
+   ```rust
+   #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+   struct WeatherRequest {
+       location: String,
+       units: Option<String>,
+   }
+   
+   impl Tool for WeatherRequest {
+       fn name(&self) -> &str { "get_weather" }
+       fn description(&self) -> &str { "Get weather for a location" }
+   }
+   ```
+
+2. **Define a Union Type** (often an enum):
+   ```rust
+   #[derive(Debug, Clone, Serialize, Deserialize)]
+   enum MyToolRequest {
+       Weather(WeatherRequest),
+       Calculator(CalculatorRequest),
+   }
+   ```
+
+3. **Implement Toolbox**:
+   ```rust
+   impl Toolbox for MyToolbox {
+       fn describe(&self) -> Vec<ToolDescription> {
+           // Generate descriptions for all tools
+       }
+       
+       fn execute(&self, name: &str, arguments: Value) -> Result<String> {
+           // Deserialize and execute specific tools
+       }
+   }
+   ```
+
+4. **Implement TypedToolbox**:
+   ```rust
+   impl TypedToolbox<MyToolRequest> for MyToolbox {
+       fn parse_tool_call(&self, tool_call: &ToolCall) -> Result<MyToolRequest> {
+           // Convert untyped calls to typed enum variants
+       }
+       
+       fn execute_typed(&self, request: MyToolRequest) -> Result<String> {
+           // Handle each enum variant with pattern matching
+       }
+   }
+   ```
+
+5. **Use ToolCallView for Processing**:
+   ```rust
+   let view = ToolCallView::<MyToolRequest, _>::new(&toolbox, &message);
+   if view.has_tool_calls() {
+       let tool_requests = view.tool_calls()?;
+       for request in tool_requests {
+           match request {
+               MyToolRequest::Weather(req) => { /* handle weather request */ },
+               MyToolRequest::Calculator(req) => { /* handle calculator request */ },
+           }
+       }
+   }
+   ```
+
+##### Architecture Benefits
+
+This architecture provides several key benefits:
+
+1. **Type Safety Without Pervasive Generics**:
+   - Core message types remain non-generic
+   - Type safety is achieved where needed without affecting other parts of the codebase
+   - Avoids complex generic bounds throughout the library
+
+2. **Separation of Concerns**:
+   - Tool definitions are separate from execution logic
+   - Untyped layer handles serialization/deserialization
+   - Typed layer handles type safety and pattern matching
+
+3. **Provider Independence**:
+   - Provider implementations work with the untyped `Toolbox` trait
+   - No provider-specific tool handling needed
+   - Automatic conversion to each provider's tool format
+
+4. **Extensibility**:
+   - Easy to add new tools by implementing the `Tool` trait
+   - Existing toolboxes can be extended with new tools
+   - Union types can be expanded without changing existing code
+
+5. **Compatibility with LLM APIs**:
+   - Tool descriptions are structured to match LLM API expectations
+   - Automatic schema generation using `schemars::JsonSchema`
+   - Consistent handling across all supported providers
+
+##### Integration with Chat
+
+The Chat struct integrates tooling through several key methods:
+
+```rust
+impl<M> Chat<M> where M: ModelInfo {
+    // Adding a toolbox at construction time
+    pub fn with_toolbox<T: Toolbox + 'static>(mut self, toolbox: T) -> Self { /*...*/ }
+    
+    // Setting a toolbox at runtime
+    pub fn set_toolbox<T: Toolbox + 'static>(&mut self, toolbox: T) { /*...*/ }
+    
+    // Getting tool descriptions
+    pub fn tool_descriptions(&self) -> Vec<ToolDescription> { /*...*/ }
+    
+    // Processing tool calls from an assistant message
+    pub fn process_tool_calls(&mut self, assistant_message: &Message) -> Result<()> { /*...*/ }
+}
+```
+
+When a message is processed by the LLM and contains tool calls, the `process_tool_calls` method executes those tools and adds the results as new `tool` role messages to the conversation history.
+
+##### Development and Testing Considerations
+
+When using the tool system, consider these best practices:
+
+1. Keep tool schemas simple and use primitive types where possible
+2. Use enums to group related tools together
+3. Implement both `Toolbox` and `TypedToolbox` for maximum flexibility
+4. Use the view pattern for processing tool responses
+5. Keep tool execution logic separate from tool definitions
+
+This design creates a type-safe system that balances flexibility, safety, and simplicity, allowing developers to define strongly-typed tools without complicating the rest of the codebase with generics.
 
 ## Future Directions
 
