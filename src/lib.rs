@@ -11,7 +11,6 @@ pub mod provider;
 pub mod secret;
 pub mod token;
 pub mod tool;
-pub mod transport;
 
 // Re-export the main types for convenient usage
 pub use chat::Chat;
@@ -19,7 +18,7 @@ pub use compactor::{ChatHistoryCompactor, DropOldestCompactor};
 pub use error::{Error, Result};
 pub use executor::SingleRequestExecutor;
 pub use message::{Content, Message, MessageRole, ToolCall};
-pub use model::{Claude, Gemini, GPT, ModelInfo};
+pub use model::{Claude, GPT, Gemini, ModelInfo};
 pub use secret::Secret;
 pub use token::TokenCounter;
-pub use tool::{Tool, Toolbox, TypedToolbox, ToolCallView, ToolDescription};
+pub use tool::{Tool, ToolCallView, ToolDescription, Toolbox, TypedToolbox};

@@ -90,11 +90,11 @@ impl<M: ModelInfo + GeminiModelInfo> HTTPProvider<M> for GeminiProvider {
         debug!("Messages in chat history: {}", chat.history.len());
 
         let model_id = chat.model.gemini_model_id();
-        let url_str = format!("{}/models/{}:generateContent?key={}", 
-            self.config.base_url,
-            model_id,
-            self.config.api_key);
-            
+        let url_str = format!(
+            "{}/models/{}:generateContent?key={}",
+            self.config.base_url, model_id, self.config.api_key
+        );
+
         debug!("Parsing URL: {}", url_str);
         let url = match Url::parse(&url_str) {
             Ok(url) => {
@@ -132,8 +132,14 @@ impl<M: ModelInfo + GeminiModelInfo> HTTPProvider<M> for GeminiProvider {
             Ok(payload) => {
                 debug!("Request payload created successfully");
                 trace!("Number of contents: {}", payload.contents.len());
-                trace!("System instruction present: {}", payload.system_instruction.is_some());
-                trace!("Generation config present: {}", payload.generation_config.is_some());
+                trace!(
+                    "System instruction present: {}",
+                    payload.system_instruction.is_some()
+                );
+                trace!(
+                    "Generation config present: {}",
+                    payload.generation_config.is_some()
+                );
                 payload
             }
             Err(e) => {
@@ -166,7 +172,8 @@ impl<M: ModelInfo + GeminiModelInfo> HTTPProvider<M> for GeminiProvider {
         trace!("Raw response: {}", raw_response_text);
 
         // First try to parse as an error response
-        if let Ok(error_response) = serde_json::from_str::<GeminiErrorResponse>(&raw_response_text) {
+        if let Ok(error_response) = serde_json::from_str::<GeminiErrorResponse>(&raw_response_text)
+        {
             if let Some(error) = error_response.error {
                 error!("Gemini API returned an error: {}", error.message);
                 return Err(Error::ProviderUnavailable(error.message));
@@ -179,7 +186,10 @@ impl<M: ModelInfo + GeminiModelInfo> HTTPProvider<M> for GeminiProvider {
             Ok(response) => {
                 debug!("Response deserialized successfully");
                 if !response.candidates.is_empty() {
-                    debug!("Content parts: {}", response.candidates[0].content.parts.len());
+                    debug!(
+                        "Content parts: {}",
+                        response.candidates[0].content.parts.len()
+                    );
                 }
                 response
             }
@@ -212,7 +222,10 @@ impl GeminiProvider {
     /// This method converts the Chat's messages and settings into a Gemini-specific
     /// format for the API request.
     #[instrument(skip(self, chat), level = "debug")]
-    fn create_request_payload<M: ModelInfo + GeminiModelInfo>(&self, chat: &Chat<M>) -> Result<GeminiRequest> {
+    fn create_request_payload<M: ModelInfo + GeminiModelInfo>(
+        &self,
+        chat: &Chat<M>,
+    ) -> Result<GeminiRequest> {
         info!("Creating request payload for chat with Gemini model");
         debug!("System prompt length: {}", chat.system_prompt.len());
         debug!("Messages in history: {}", chat.history.len());
@@ -246,7 +259,7 @@ impl GeminiProvider {
                         Some(MessageRole::Assistant) => Some("model".to_string()),
                         _ => None,
                     };
-                    
+
                     contents.push(GeminiContent {
                         parts: std::mem::take(&mut current_parts),
                         role,
@@ -287,7 +300,7 @@ impl GeminiProvider {
                 Some(MessageRole::Assistant) => Some("model".to_string()),
                 _ => None,
             };
-            
+
             contents.push(GeminiContent {
                 parts: current_parts,
                 role,
@@ -324,7 +337,7 @@ pub(crate) struct GeminiPart {
     /// The text content (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
-    
+
     /// The inline data (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub inline_data: Option<GeminiInlineData>,
@@ -343,10 +356,7 @@ impl GeminiPart {
     fn inline_data(data: String, mime_type: String) -> Self {
         GeminiPart {
             text: None,
-            inline_data: Some(GeminiInlineData {
-                data,
-                mime_type,
-            }),
+            inline_data: Some(GeminiInlineData { data, mime_type }),
         }
     }
 }
@@ -422,14 +432,14 @@ pub(crate) struct GeminiCandidate {
     /// The content of the candidate
     pub content: GeminiContent,
     /// The finish reason (using camelCase as in the API)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub finishReason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "finishReason")]
+    pub finish_reason: Option<String>,
     /// The index of the candidate (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub index: Option<i32>,
     /// The average log probability (optional)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub avgLogprobs: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "avgLogprobs")]
+    pub avg_logprobs: Option<f64>,
 }
 
 /// Represents token details for a specific modality
@@ -455,10 +465,16 @@ pub(crate) struct GeminiUsageMetadata {
     #[serde(rename = "totalTokenCount", default)]
     pub total_token_count: u32,
     /// Detailed token breakdown for the prompt
-    #[serde(rename = "promptTokensDetails", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "promptTokensDetails",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub prompt_tokens_details: Option<Vec<GeminiTokenDetails>>,
     /// Detailed token breakdown for the candidates
-    #[serde(rename = "candidatesTokensDetails", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "candidatesTokensDetails",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub candidates_tokens_details: Option<Vec<GeminiTokenDetails>>,
 }
 
@@ -487,12 +503,15 @@ impl From<&GeminiResponse> for Message {
         if response.candidates.is_empty() {
             return Message::assistant("No response generated");
         }
-        
+
         // Get the first candidate
         let candidate = &response.candidates[0];
-        
+
         // Convert the parts to content parts
-        let content_parts: Vec<ContentPart> = candidate.content.parts.iter()
+        let content_parts: Vec<ContentPart> = candidate
+            .content
+            .parts
+            .iter()
             .map(|part| {
                 if let Some(text) = &part.text {
                     ContentPart::text(text.clone())
@@ -500,8 +519,7 @@ impl From<&GeminiResponse> for Message {
                     // Just convert to text representation for now
                     ContentPart::text(format!(
                         "[Image: {} ({})]",
-                        inline_data.data, 
-                        inline_data.mime_type
+                        inline_data.data, inline_data.mime_type
                     ))
                 } else {
                     // Empty part as fallback
@@ -509,7 +527,7 @@ impl From<&GeminiResponse> for Message {
                 }
             })
             .collect();
-        
+
         let content = if content_parts.len() == 1 {
             // If there's only one text part, use simple Text content
             match &content_parts[0] {
@@ -520,7 +538,7 @@ impl From<&GeminiResponse> for Message {
             // Multiple content parts
             Some(Content::Parts(content_parts))
         };
-        
+
         let mut msg = Message {
             role: MessageRole::Assistant,
             content,
@@ -530,7 +548,7 @@ impl From<&GeminiResponse> for Message {
             tool_call_id: None,
             metadata: Default::default(),
         };
-        
+
         // Add usage info if available
         if let Some(usage) = &response.usage_metadata {
             msg = msg.with_metadata(
@@ -546,7 +564,7 @@ impl From<&GeminiResponse> for Message {
                 serde_json::Value::Number(usage.total_token_count.into()),
             );
         }
-        
+
         msg
     }
 }
@@ -554,7 +572,7 @@ impl From<&GeminiResponse> for Message {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     // Tests will be implemented as we get more information about the API
     #[test]
     fn test_gemini_part_serialization() {
@@ -562,16 +580,14 @@ mod tests {
         let serialized = serde_json::to_string(&text_part).unwrap();
         let expected = r#"{"text":"Hello, world!"}"#;
         assert_eq!(serialized, expected);
-        
-        let inline_data_part = GeminiPart::inline_data(
-            "base64data".to_string(),
-            "image/jpeg".to_string(),
-        );
+
+        let inline_data_part =
+            GeminiPart::inline_data("base64data".to_string(), "image/jpeg".to_string());
         let serialized = serde_json::to_string(&inline_data_part).unwrap();
         let expected = r#"{"inline_data":{"data":"base64data","mime_type":"image/jpeg"}}"#;
         assert_eq!(serialized, expected);
     }
-    
+
     #[test]
     fn test_error_response_parsing() {
         let error_json = r#"{
@@ -581,7 +597,7 @@ mod tests {
                 "status": "INVALID_ARGUMENT"
             }
         }"#;
-        
+
         let error_response: GeminiErrorResponse = serde_json::from_str(error_json).unwrap();
         assert!(error_response.error.is_some());
         let error = error_response.error.unwrap();
