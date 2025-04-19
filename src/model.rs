@@ -133,3 +133,53 @@ impl crate::provider::openai::OpenAIModelInfo for GPT {
         }.to_string()
     }
 }
+
+/// Represents a Mistral AI model
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mistral {
+    /// Mistral Large
+    Large,
+    /// Mistral Small
+    Small,
+    /// Open Mistral Nemo
+    Nemo,
+    /// Codestral
+    Codestral,
+    /// Mistral Embed
+    Embed,
+}
+
+impl ModelInfo for Mistral {
+    fn context_window(&self) -> usize {
+        match self {
+            Self::Large => 131_072,  // 131k
+            Self::Small => 131_072,  // 131k
+            Self::Nemo => 131_072,   // 131k
+            Self::Codestral => 262_144, // 256k
+            Self::Embed => 8_192,    // 8k
+        }
+    }
+
+    fn max_output_tokens(&self) -> usize {
+        match self {
+            Self::Large => 4_096,
+            Self::Small => 4_096,
+            Self::Nemo => 4_096,
+            Self::Codestral => 4_096,
+            Self::Embed => 4_096,
+        }
+    }
+}
+
+// Implement the MistralModelInfo trait from provider/mistral.rs
+impl crate::provider::mistral::MistralModelInfo for Mistral {
+    fn mistral_model_id(&self) -> String {
+        match self {
+            Self::Large => "mistral-large-latest",
+            Self::Small => "mistral-small-latest",
+            Self::Nemo => "open-mistral-nemo",
+            Self::Codestral => "codestral-latest",
+            Self::Embed => "mistral-embed",
+        }.to_string()
+    }
+}

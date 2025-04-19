@@ -4,7 +4,7 @@ A Rust library that provides abstractions for Large Language Models (LLMs).
 
 ## Overview
 
-Language Barrier simplifies working with multiple LLM providers by offering a unified, type-safe API. It allows you to easily switch between different providers like OpenAI, Anthropic, Google, and more without changing your application code.
+Language Barrier simplifies working with multiple LLM providers by offering a unified, type-safe API. It allows you to easily switch between different providers like OpenAI, Anthropic, Google, Mistral, and more without changing your application code.
 
 ## Features
 
@@ -199,6 +199,10 @@ let chat = Chat::new(Gemini::Flash20);
 // Using OpenAI's GPT
 let provider = OpenAIProvider::new();
 let chat = Chat::new(GPT::GPT4o);
+
+// Using Mistral AI
+let provider = MistralProvider::new();
+let chat = Chat::new(Mistral::Small);
 ```
 
 ## Token Management and History Compaction

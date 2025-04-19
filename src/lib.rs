@@ -18,7 +18,7 @@ pub use compactor::{ChatHistoryCompactor, DropOldestCompactor};
 pub use error::{Error, Result};
 pub use executor::SingleRequestExecutor;
 pub use message::{Content, Message, MessageRole, ToolCall};
-pub use model::{Claude, GPT, Gemini, ModelInfo};
+pub use model::{Claude, GPT, Gemini, Mistral, ModelInfo};
 pub use secret::Secret;
 pub use token::TokenCounter;
 pub use tool::{Tool, ToolCallView, ToolDescription, Toolbox, TypedToolbox};
