@@ -5,6 +5,7 @@ use crate::provider::HTTPProvider;
 use crate::{Chat, Claude};
 use reqwest::{Method, Request, Url};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::env;
 use tracing::{debug, error, info, instrument, trace, warn};
 
@@ -274,13 +275,13 @@ impl AnthropicProvider {
         debug!("Max output tokens: {}", chat.max_output_tokens);
 
         // Convert system prompt if present
-        let system = if !chat.system_prompt.is_empty() {
+        let system = if chat.system_prompt.is_empty() {
+            debug!("No system prompt provided");
+            None
+        } else {
             debug!("Including system prompt in request");
             trace!("System prompt: {}", chat.system_prompt);
             Some(chat.system_prompt.clone())
-        } else {
-            debug!("No system prompt provided");
-            None
         };
 
         // Convert messages
@@ -306,7 +307,9 @@ impl AnthropicProvider {
             let tool_descriptions = chat.tool_descriptions();
             debug!("Converting {} tool descriptions to Anthropic format", tool_descriptions.len());
             
-            if !tool_descriptions.is_empty() {
+            if tool_descriptions.is_empty() {
+                None
+            } else {
                 Some(
                     tool_descriptions
                         .into_iter()
@@ -317,8 +320,6 @@ impl AnthropicProvider {
                         })
                         .collect()
                 )
-            } else {
-                None
             }
         } else {
             debug!("No toolbox provided");
@@ -409,7 +410,7 @@ pub(crate) struct AnthropicToolResponse {
     /// The type of the tool response
     #[serde(rename = "type")]
     pub type_field: String,
-    /// The ID of the tool call (Anthropic API uses tool_use_id, but we use tool_call_id internally)
+    /// The ID of the tool call (Anthropic API uses `tool_use_id`, but we use `tool_call_id` internally)
     #[serde(rename = "tool_use_id")]
     pub tool_call_id: String,
     /// The content of the tool response
@@ -510,9 +511,8 @@ impl From<&Message> for AnthropicMessage {
     fn from(msg: &Message) -> Self {
         let role = match msg {
             Message::System { .. } => "system",
-            Message::User { .. } => "user",
+            Message::User { .. } | Message::Tool { .. } => "user", // API requires tool_result blocks to be in user messages
             Message::Assistant { .. } => "assistant",
-            Message::Tool { .. } => "user", // API requires tool_result blocks to be in user messages
         }
         .to_string();
 
@@ -541,7 +541,7 @@ impl From<&Message> for AnthropicMessage {
                         }
                     })
                     .collect(),
-                None => vec![AnthropicContentPart::text("".to_string())],
+                None => vec![AnthropicContentPart::text(String::new())],
             },
             Message::Tool { tool_call_id, content, .. } => {
                 // For tool messages, add a tool_result part
@@ -564,10 +564,7 @@ impl From<&AnthropicResponseContent> for ContentPart {
             AnthropicResponseContent::Text { text } => ContentPart::text(text.clone()),
             AnthropicResponseContent::ToolUse { id, name, input } => {
                 // For tool use, we'll create a text representation
-                let text = format!(
-                    "{{\"id\":\"{}\",\"name\":\"{}\",\"input\":{}}}",
-                    id, name, input
-                );
+                let text = format!("{{\"id\":\"{id}\",\"name\":\"{name}\",\"input\":{input}}}");
                 ContentPart::text(text)
             }
         }
@@ -610,7 +607,7 @@ impl From<&AnthropicResponse> for Message {
         } else if text_content.len() == 1 {
             match &text_content[0] {
                 ContentPart::Text { text } => Some(Content::Text(text.clone())),
-                _ => Some(Content::Parts(text_content)),
+                ContentPart::ImageUrl { .. } => Some(Content::Parts(text_content)),
             }
         } else {
             Some(Content::Parts(text_content))
@@ -619,21 +616,21 @@ impl From<&AnthropicResponse> for Message {
         // Create the message based on response.role
         let mut msg = match response.role.as_str() {
             "assistant" => {
-                if !tool_calls.is_empty() {
-                    Message::Assistant {
-                        content,
-                        tool_calls,
-                        metadata: Default::default(),
-                    }
-                } else {
+                if tool_calls.is_empty() {
                     let content_to_use = content.unwrap_or(Content::Text(String::new()));
                     match content_to_use {
                         Content::Text(text) => Message::assistant(text),
                         Content::Parts(_) => Message::Assistant {
                             content: Some(content_to_use),
                             tool_calls: Vec::new(),
-                            metadata: Default::default(),
+                            metadata: HashMap::default(),
                         },
+                    }
+                } else {
+                    Message::Assistant {
+                        content,
+                        tool_calls,
+                        metadata: HashMap::default(),
                     }
                 }
             }
@@ -643,7 +640,7 @@ impl From<&AnthropicResponse> for Message {
                 Some(Content::Parts(parts)) => Message::User {
                     content: Content::Parts(parts),
                     name: None,
-                    metadata: Default::default(),
+                    metadata: HashMap::default(),
                 },
                 None => Message::user(""),
             },

@@ -343,7 +343,7 @@ where
     toolbox: &'a TB,
     /// The message containing tool calls
     message: &'a Message,
-    /// PhantomData to use the type parameter T
+    /// `PhantomData` to use the type parameter T
     _phantom: PhantomData<T>,
 }
 
@@ -404,6 +404,7 @@ where
     /// # Returns
     ///
     /// `true` if the message contains at least one tool call, `false` otherwise.
+    #[must_use]
     pub fn has_tool_calls(&self) -> bool {
         match self.message {
             Message::Assistant { tool_calls, .. } => !tool_calls.is_empty(),

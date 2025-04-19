@@ -37,13 +37,11 @@ impl ModelInfo for Claude {
 
     fn max_output_tokens(&self) -> usize {
         match self {
-            Self::Sonnet35 { version: _ } => 8192,
             Self::Sonnet37 {
                 use_extended_thinking: _,
             } => 64_000,
-            Self::Haiku35 => 8192,
-            Self::Haiku3 => 4096,
-            Self::Opus3 => 4096,
+            Self::Sonnet35 { version: _ } | Self::Haiku35 => 8192,
+            Self::Haiku3 | Self::Opus3 => 4096,
         }
     }
 }
@@ -69,9 +67,7 @@ impl ModelInfo for Gemini {
 
     fn max_output_tokens(&self) -> usize {
         match self {
-            Self::Flash15 => 8_192,
-            Self::Flash20 => 8_192,
-            Self::Flash20Lite => 8_192,
+            Self::Flash15 | Self::Flash20 | Self::Flash20Lite => 8_192,
             Self::Flash25Preview => 65_536,
         }
     }
@@ -89,7 +85,7 @@ impl crate::provider::gemini::GeminiModelInfo for Gemini {
     }
 }
 
-/// Represents an OpenAI GPT model
+/// Represents an `OpenAI` GPT model
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GPT {
     /// GPT-4o model
@@ -105,19 +101,14 @@ pub enum GPT {
 impl ModelInfo for GPT {
     fn context_window(&self) -> usize {
         match self {
-            Self::GPT4o => 128_000,
-            Self::GPT4oMini => 128_000,
-            Self::GPT4Turbo => 128_000,
+            Self::GPT4o | Self::GPT4oMini | Self::GPT4Turbo => 128_000,
             Self::GPT35Turbo => 16_000,
         }
     }
 
     fn max_output_tokens(&self) -> usize {
         match self {
-            Self::GPT4o => 4_096,
-            Self::GPT4oMini => 4_096,
-            Self::GPT4Turbo => 4_096,
-            Self::GPT35Turbo => 4_096,
+            Self::GPT4o | Self::GPT4oMini | Self::GPT4Turbo | Self::GPT35Turbo => 4_096,
         }
     }
 }
@@ -152,22 +143,15 @@ pub enum Mistral {
 impl ModelInfo for Mistral {
     fn context_window(&self) -> usize {
         match self {
-            Self::Large => 131_072,  // 131k
-            Self::Small => 131_072,  // 131k
-            Self::Nemo => 131_072,   // 131k
+            Self::Large | Self::Small | Self::Nemo => 131_072,  // 131k
             Self::Codestral => 262_144, // 256k
             Self::Embed => 8_192,    // 8k
         }
     }
 
     fn max_output_tokens(&self) -> usize {
-        match self {
-            Self::Large => 4_096,
-            Self::Small => 4_096,
-            Self::Nemo => 4_096,
-            Self::Codestral => 4_096,
-            Self::Embed => 4_096,
-        }
+        // All Mistral models have the same max output tokens
+        4_096
     }
 }
 

@@ -35,6 +35,7 @@ impl Content {
     /// let parts = vec![ContentPart::text("Hello"), ContentPart::text("world")];
     /// let content = Content::parts(parts);
     /// ```
+    #[must_use]
     pub fn parts(parts: Vec<ContentPart>) -> Self {
         Content::Parts(parts)
     }
@@ -52,10 +53,11 @@ impl Content {
     /// let content = Content::text("Hello");
     /// assert!(!content.is_empty());
     /// ```
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         match self {
             Content::Text(text) => text.is_empty(),
-            Content::Parts(parts) => parts.is_empty() || parts.iter().all(|p| p.is_empty()),
+            Content::Parts(parts) => parts.is_empty() || parts.iter().all(ContentPart::is_empty),
         }
     }
 }
@@ -118,6 +120,7 @@ impl ContentPart {
     /// let part = ContentPart::text("Hello");
     /// assert!(!part.is_empty());
     /// ```
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         match self {
             ContentPart::Text { text } => text.is_empty(),
@@ -163,6 +166,7 @@ impl ImageUrl {
     /// let image_url = ImageUrl::new("https://example.com/image.jpg")
     ///     .with_detail("high");
     /// ```
+    #[must_use]
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
         self.detail = Some(detail.into());
         self
@@ -308,6 +312,7 @@ impl Message {
     /// ];
     /// let msg = Message::user_with_parts(parts);
     /// ```
+    #[must_use]
     pub fn user_with_parts(parts: Vec<ContentPart>) -> Self {
         Message::User {
             content: Content::Parts(parts),
@@ -350,6 +355,7 @@ impl Message {
     /// };
     /// let msg = Message::assistant_with_tool_calls(vec![tool_call]);
     /// ```
+    #[must_use]
     pub fn assistant_with_tool_calls(tool_calls: Vec<ToolCall>) -> Self {
         Message::Assistant {
             content: None,
@@ -385,6 +391,7 @@ impl Message {
     /// let msg = Message::user("Hello");
     /// assert_eq!(msg.role_str(), "user");
     /// ```
+    #[must_use]
     pub fn role_str(&self) -> &'static str {
         match self {
             Message::System { .. } => "system",
@@ -405,6 +412,7 @@ impl Message {
     /// let msg = Message::user("Hello")
     ///     .with_metadata("priority", json!(5));
     /// ```
+    #[must_use]
     pub fn with_metadata(self, key: impl Into<String>, value: serde_json::Value) -> Self {
         match self {
             Message::System { content, mut metadata } => {

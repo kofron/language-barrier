@@ -34,6 +34,7 @@ impl TokenCounter {
     /// let counter = TokenCounter::new();
     /// assert_eq!(counter.total(), 0);
     /// ```
+    #[must_use]
     pub fn new() -> Self {
         Self { total: 0 }
     }
@@ -51,6 +52,7 @@ impl TokenCounter {
     /// assert_eq!(TokenCounter::count_tokens("Hello, world!"), 2);
     /// assert_eq!(TokenCounter::count_tokens("one two three four"), 4);
     /// ```
+    #[must_use]
     pub fn count_tokens(text: &str) -> usize {
         text.split_whitespace().count()
     }
@@ -103,6 +105,7 @@ impl TokenCounter {
     /// counter.observe("Hello, world!");
     /// assert_eq!(counter.total(), 2);
     /// ```
+    #[must_use]
     pub fn total(&self) -> usize {
         self.total
     }
@@ -119,6 +122,7 @@ impl TokenCounter {
     /// assert!(counter.under_budget(5));
     /// assert!(!counter.under_budget(1));
     /// ```
+    #[must_use]
     pub fn under_budget(&self, max: usize) -> bool {
         self.total <= max
     }

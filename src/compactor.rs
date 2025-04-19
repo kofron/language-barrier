@@ -37,9 +37,6 @@ impl ChatHistoryCompactor for DropOldestCompactor {
 
             // Update the token count based on message type
             match &removed_msg {
-                crate::message::Message::System { content, .. } => {
-                    counter.subtract(content);
-                }
                 crate::message::Message::User { content, .. } => {
                     match content {
                         crate::message::Content::Text(text) => {
@@ -72,7 +69,7 @@ impl ChatHistoryCompactor for DropOldestCompactor {
                         }
                     }
                 }
-                crate::message::Message::Tool { content, .. } => {
+                crate::message::Message::System { content, .. } | crate::message::Message::Tool { content, .. } => {
                     counter.subtract(content);
                 }
             }

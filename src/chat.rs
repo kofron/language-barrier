@@ -40,25 +40,25 @@ where
     }
 
     /// Sets system prompt and returns self for method chaining
+    #[must_use]
     pub fn with_system_prompt(mut self, prompt: impl Into<String>) -> Self {
         self.set_system_prompt(prompt);
         self
     }
 
     /// Sets max output tokens and returns self for method chaining
+    #[must_use]
     pub fn with_max_output_tokens(mut self, n: usize) -> Self {
         self.max_output_tokens = n;
         self
     }
 
     /// Sets history and returns self for method chaining
+    #[must_use]
     pub fn with_history(mut self, history: Vec<Message>) -> Self {
         // Recompute token counter from scratch
         for msg in &history {
             match msg {
-                Message::System { content, .. } => {
-                    self.token_counter.observe(content);
-                },
                 Message::User { content, .. } => {
                     if let Content::Text(text) = content {
                         self.token_counter.observe(text);
@@ -69,7 +69,7 @@ where
                         self.token_counter.observe(text);
                     }
                 },
-                Message::Tool { content, .. } => {
+                Message::System { content, .. } | Message::Tool { content, .. } => {
                     self.token_counter.observe(content);
                 }
             }
@@ -79,6 +79,7 @@ where
     }
 
     /// Sets compactor and returns self for method chaining
+    #[must_use]
     pub fn with_compactor<C: ChatHistoryCompactor + 'static>(mut self, comp: C) -> Self {
         self.compactor = Box::new(comp);
         self.trim_to_context_window();
@@ -102,9 +103,6 @@ where
     pub fn push_message(&mut self, msg: Message) {
         // Count tokens based on message type
         match &msg {
-            Message::System { content, .. } => {
-                self.token_counter.observe(content);
-            },
             Message::User { content, .. } => {
                 if let Content::Text(text) = content {
                     self.token_counter.observe(text);
@@ -115,7 +113,7 @@ where
                     self.token_counter.observe(text);
                 }
             },
-            Message::Tool { content, .. } => {
+            Message::System { content, .. } | Message::Tool { content, .. } => {
                 self.token_counter.observe(content);
             }
         }
@@ -123,7 +121,7 @@ where
         self.trim_to_context_window();
     }
     
-    /// Alias for push_message for better readability
+    /// Alias for `push_message` for better readability
     pub fn add_message(&mut self, msg: Message) {
         self.push_message(msg);
     }
@@ -147,6 +145,7 @@ where
     }
     
     /// Sets a toolbox for function/tool calling
+    #[must_use]
     pub fn with_toolbox<T: Toolbox + 'static>(mut self, toolbox: T) -> Self {
         self.toolbox = Some(Box::new(toolbox));
         self
@@ -169,6 +168,18 @@ where
     /// 
     /// This function examines an assistant message for tool calls, executes them
     /// using the current toolbox, and adds the tool response messages to the history.
+    /// 
+    /// # Errors
+    /// 
+    /// Returns an error if:
+    /// - Tool execution fails
+    /// - The tool call arguments cannot be parsed
+    /// - Any provider-specific error occurs during execution
+    /// 
+    /// # Panics
+    /// 
+    /// Panics if `toolbox` is accessed when it is `None`. This should never happen
+    /// because we check for toolbox existence at the beginning of the method.
     pub fn process_tool_calls(&mut self, assistant_message: &Message) -> crate::error::Result<()> {
         // If there's no toolbox, there's nothing to do
         if self.toolbox.is_none() {
