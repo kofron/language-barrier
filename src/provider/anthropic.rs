@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::message::{Content, ContentPart, Message, MessageRole};
+use crate::message::{Content, ContentPart, Message};
 use crate::model::Sonnet35Version;
 use crate::provider::HTTPProvider;
 use crate::{Chat, Claude};
@@ -236,7 +236,7 @@ impl HTTPProvider<Claude> for AnthropicProvider {
         let message = Message::from(&anthropic_response);
 
         info!("Response parsed successfully");
-        trace!("Message content: {:?}", message.content);
+        trace!("Response message processed");
 
         Ok(message)
     }
@@ -288,9 +288,9 @@ impl AnthropicProvider {
         let messages: Vec<AnthropicMessage> = chat
             .history
             .iter()
-            .filter(|msg| msg.role != MessageRole::System) // Filter out system messages as they go in system field
+            .filter(|msg| !matches!(msg, Message::System { .. })) // Filter out system messages as they go in system field
             .map(|msg| {
-                trace!("Converting message with role: {:?}", msg.role);
+                trace!("Converting message with role: {}", msg.role_str());
                 AnthropicMessage::from(msg)
             })
             .collect();
@@ -508,41 +508,50 @@ pub(crate) struct AnthropicUsage {
 /// Convert from our Message to Anthropic's message format
 impl From<&Message> for AnthropicMessage {
     fn from(msg: &Message) -> Self {
-        let role = match msg.role {
-            MessageRole::System => "system",
-            MessageRole::User => "user",
-            MessageRole::Assistant => "assistant",
-            MessageRole::Function => "user", // Map function to user since Anthropic doesn't have function role
-            MessageRole::Tool => "user",     // We'll handle tool responses specially below
+        let role = match msg {
+            Message::System { .. } => "system",
+            Message::User { .. } => "user",
+            Message::Assistant { .. } => "assistant",
+            Message::Tool { .. } => "user", // Map tool to user as we'll handle tool responses specially below
         }
         .to_string();
 
-        let mut content = match &msg.content {
-            Some(Content::Text(text)) => vec![AnthropicContentPart::text(text.clone())],
-            Some(Content::Parts(parts)) => parts
-                .iter()
-                .map(|part| match part {
-                    ContentPart::Text { text } => AnthropicContentPart::text(text.clone()),
-                    ContentPart::ImageUrl { image_url } => {
-                        AnthropicContentPart::image(image_url.url.clone())
-                    }
-                })
-                .collect(),
-            None => vec![AnthropicContentPart::text("".to_string())],
-        };
-
-        // If this is a tool message, add a tool_result part
-        if msg.role == MessageRole::Tool && msg.tool_call_id.is_some() {
-            if let Some(Content::Text(text)) = &msg.content {
-                // We need to keep the first part if it exists, but replace any existing content with a tool_result
-                // Note: Anthropic API uses tool_use_id, but our internal API uses tool_call_id
-                content = vec![AnthropicContentPart::ToolResult(AnthropicToolResponse {
+        let content = match msg {
+            Message::System { content, .. } => vec![AnthropicContentPart::text(content.clone())],
+            Message::User { content, .. } => match content {
+                Content::Text(text) => vec![AnthropicContentPart::text(text.clone())],
+                Content::Parts(parts) => parts
+                    .iter()
+                    .map(|part| match part {
+                        ContentPart::Text { text } => AnthropicContentPart::text(text.clone()),
+                        ContentPart::ImageUrl { image_url } => {
+                            AnthropicContentPart::image(image_url.url.clone())
+                        }
+                    })
+                    .collect(),
+            },
+            Message::Assistant { content, .. } => match content {
+                Some(Content::Text(text)) => vec![AnthropicContentPart::text(text.clone())],
+                Some(Content::Parts(parts)) => parts
+                    .iter()
+                    .map(|part| match part {
+                        ContentPart::Text { text } => AnthropicContentPart::text(text.clone()),
+                        ContentPart::ImageUrl { image_url } => {
+                            AnthropicContentPart::image(image_url.url.clone())
+                        }
+                    })
+                    .collect(),
+                None => vec![AnthropicContentPart::text("".to_string())],
+            },
+            Message::Tool { tool_call_id, content, .. } => {
+                // For tool messages, add a tool_result part
+                vec![AnthropicContentPart::ToolResult(AnthropicToolResponse {
                     type_field: "tool_result".to_string(),
-                    tool_call_id: msg.tool_call_id.as_ref().unwrap().clone(),
-                    content: text.clone(),
-                })];
+                    tool_call_id: tool_call_id.clone(),
+                    content: content.clone(),
+                })]
             }
-        }
+        };
 
         AnthropicMessage { role, content }
     }
@@ -568,11 +577,6 @@ impl From<&AnthropicResponseContent> for ContentPart {
 /// Convert from Anthropic's response to our message format
 impl From<&AnthropicResponse> for Message {
     fn from(response: &AnthropicResponse) -> Self {
-        let role = match response.role.as_str() {
-            "assistant" => MessageRole::Assistant,
-            _ => MessageRole::User, // Default to user for unknown roles
-        };
-
         // Extract text content and tool calls from response content
         let mut text_content = Vec::new();
         let mut tool_calls = Vec::new();
@@ -584,7 +588,7 @@ impl From<&AnthropicResponse> for Message {
                 }
                 AnthropicResponseContent::ToolUse { id, name, input } => {
                     // Convert tool use to our ToolCall format
-                    let function_call = crate::message::FunctionCall {
+                    let function = crate::message::Function {
                         name: name.clone(),
                         arguments: serde_json::to_string(input).unwrap_or_default(),
                     };
@@ -592,7 +596,7 @@ impl From<&AnthropicResponse> for Message {
                     let tool_call = crate::message::ToolCall {
                         id: id.clone(),
                         tool_type: "function".to_string(),
-                        function: function_call,
+                        function,
                     };
 
                     tool_calls.push(tool_call);
@@ -612,22 +616,37 @@ impl From<&AnthropicResponse> for Message {
             Some(Content::Parts(text_content))
         };
 
-        // Create the tool_calls option
-        let tool_calls_option = if tool_calls.is_empty() {
-            None
-        } else {
-            Some(tool_calls)
-        };
-
-        // Create the base message
-        let mut msg = Message {
-            role,
-            content,
-            name: None,
-            function_call: None,
-            tool_calls: tool_calls_option,
-            tool_call_id: None,
-            metadata: Default::default(),
+        // Create the message based on response.role
+        let mut msg = match response.role.as_str() {
+            "assistant" => {
+                if !tool_calls.is_empty() {
+                    Message::Assistant {
+                        content,
+                        tool_calls,
+                        metadata: Default::default(),
+                    }
+                } else {
+                    let content_to_use = content.unwrap_or(Content::Text(String::new()));
+                    match content_to_use {
+                        Content::Text(text) => Message::assistant(text),
+                        Content::Parts(_) => Message::Assistant {
+                            content: Some(content_to_use),
+                            tool_calls: Vec::new(),
+                            metadata: Default::default(),
+                        },
+                    }
+                }
+            }
+            // Default to user for unknown roles
+            _ => match content {
+                Some(Content::Text(text)) => Message::user(text),
+                Some(Content::Parts(parts)) => Message::User {
+                    content: Content::Parts(parts),
+                    name: None,
+                    metadata: Default::default(),
+                },
+                None => Message::user(""),
+            },
         };
 
         // Add token usage info as metadata
@@ -648,7 +667,7 @@ impl From<&AnthropicResponse> for Message {
 mod tests {
     use super::*;
     use crate::message::ImageUrl;
-    use crate::message::{Content, ContentPart, Message, MessageRole};
+    use crate::message::{Content, ContentPart, Message};
 
     #[test]
     fn test_message_to_anthropic_conversion() {
@@ -665,7 +684,7 @@ mod tests {
 
         // Test multipart message
         let parts = vec![ContentPart::text("Hello"), ContentPart::text("world")];
-        let msg = Message::user("").with_content_parts(parts);
+        let msg = Message::user_with_parts(parts);
         let anthropic_msg = AnthropicMessage::from(&msg);
 
         assert_eq!(anthropic_msg.role, "user");
@@ -679,12 +698,11 @@ mod tests {
         assert_eq!(anthropic_msg.content.len(), 1);
 
         // Test image content
-        let image_url = ImageUrl::new("https://example.com/image.jpg");
         let parts = vec![
             ContentPart::text("Look at this image:"),
-            ContentPart::image_url(image_url),
+            ContentPart::image_url("https://example.com/image.jpg"),
         ];
-        let msg = Message::user("").with_content_parts(parts);
+        let msg = Message::user_with_parts(parts);
         let anthropic_msg = AnthropicMessage::from(&msg);
 
         assert_eq!(anthropic_msg.role, "user");
@@ -738,15 +756,28 @@ mod tests {
 
         let msg = Message::from(&response);
 
-        assert_eq!(msg.role, MessageRole::Assistant);
-        match &msg.content {
-            Some(Content::Text(text)) => assert_eq!(text, "I'm Claude, an AI assistant."),
-            _ => panic!("Expected text content"),
+        // Check the message is an Assistant variant
+        match &msg {
+            Message::Assistant { content, tool_calls, .. } => {
+                // Verify content
+                match content {
+                    Some(Content::Text(text)) => assert_eq!(text, "I'm Claude, an AI assistant."),
+                    _ => panic!("Expected text content"),
+                }
+                // Verify no tool calls
+                assert!(tool_calls.is_empty());
+            }
+            _ => panic!("Expected Assistant variant"),
         }
 
         // Check metadata
-        assert_eq!(msg.metadata["input_tokens"], 10);
-        assert_eq!(msg.metadata["output_tokens"], 20);
+        match &msg {
+            Message::Assistant { metadata, .. } => {
+                assert_eq!(metadata["input_tokens"], 10);
+                assert_eq!(metadata["output_tokens"], 20);
+            }
+            _ => panic!("Expected Assistant variant"),
+        }
 
         // Test multiple content parts
         let response = AnthropicResponse {
@@ -775,36 +806,38 @@ mod tests {
 
         let msg = Message::from(&response);
 
-        assert_eq!(msg.role, MessageRole::Assistant);
-        
-        // Verify content
-        match &msg.content {
-            Some(Content::Text(text)) => {
-                assert_eq!(text, "Here's the information:");
-            }
-            Some(Content::Parts(parts)) => {
-                assert_eq!(parts.len(), 1);
-                match &parts[0] {
-                    ContentPart::Text { text } => assert_eq!(text, "Here's the information:"),
-                    _ => panic!("Expected text content"),
+        // Check the message is an Assistant variant
+        match &msg {
+            Message::Assistant { content, tool_calls, .. } => {
+                // Verify content
+                match content {
+                    Some(Content::Text(text)) => {
+                        assert_eq!(text, "Here's the information:");
+                    }
+                    Some(Content::Parts(parts)) => {
+                        assert_eq!(parts.len(), 1);
+                        match &parts[0] {
+                            ContentPart::Text { text } => assert_eq!(text, "Here's the information:"),
+                            _ => panic!("Expected text content"),
+                        }
+                    }
+                    _ => panic!("Expected content"),
                 }
+                
+                // Verify tool calls
+                assert_eq!(tool_calls.len(), 1);
+                
+                let tool_call = &tool_calls[0];
+                assert_eq!(tool_call.id, "tool_123");
+                assert_eq!(tool_call.tool_type, "function");
+                assert_eq!(tool_call.function.name, "get_weather");
+                
+                // Parse the arguments JSON to verify it
+                let arguments: serde_json::Value = serde_json::from_str(&tool_call.function.arguments).unwrap();
+                assert_eq!(arguments["location"], "San Francisco");
             }
-            _ => panic!("Expected text or parts content"),
+            _ => panic!("Expected Assistant variant"),
         }
-        
-        // Verify tool calls
-        assert!(msg.tool_calls.is_some());
-        let tool_calls = msg.tool_calls.as_ref().unwrap();
-        assert_eq!(tool_calls.len(), 1);
-        
-        let tool_call = &tool_calls[0];
-        assert_eq!(tool_call.id, "tool_123");
-        assert_eq!(tool_call.tool_type, "function");
-        assert_eq!(tool_call.function.name, "get_weather");
-        
-        // Parse the arguments JSON to verify it
-        let arguments: serde_json::Value = serde_json::from_str(&tool_call.function.arguments).unwrap();
-        assert_eq!(arguments["location"], "San Francisco");
     }
     
     #[test]
@@ -833,27 +866,29 @@ mod tests {
 
         let msg = Message::from(&response);
 
-        assert_eq!(msg.role, MessageRole::Assistant);
-        
-        // Content should be None since there's no text
-        assert!(msg.content.is_none() || 
-               (match &msg.content {
-                   Some(Content::Parts(parts)) => parts.is_empty(),
-                   _ => false,
-               }));
-        
-        // Verify tool calls
-        assert!(msg.tool_calls.is_some());
-        let tool_calls = msg.tool_calls.as_ref().unwrap();
-        assert_eq!(tool_calls.len(), 1);
-        
-        let tool_call = &tool_calls[0];
-        assert_eq!(tool_call.id, "tool_xyz");
-        assert_eq!(tool_call.function.name, "calculate");
-        
-        // Parse the arguments JSON to verify it
-        let arguments: serde_json::Value = serde_json::from_str(&tool_call.function.arguments).unwrap();
-        assert_eq!(arguments["expression"], "2+2");
+        // Check the message is an Assistant variant
+        match &msg {
+            Message::Assistant { content, tool_calls, .. } => {
+                // Content should be None since there's no text
+                assert!(content.is_none() || 
+                       (match content {
+                           Some(Content::Parts(parts)) => parts.is_empty(),
+                           _ => false,
+                       }));
+                
+                // Verify tool calls
+                assert_eq!(tool_calls.len(), 1);
+                
+                let tool_call = &tool_calls[0];
+                assert_eq!(tool_call.id, "tool_xyz");
+                assert_eq!(tool_call.function.name, "calculate");
+                
+                // Parse the arguments JSON to verify it
+                let arguments: serde_json::Value = serde_json::from_str(&tool_call.function.arguments).unwrap();
+                assert_eq!(arguments["expression"], "2+2");
+            }
+            _ => panic!("Expected Assistant variant"),
+        }
     }
 
     #[test]
@@ -892,15 +927,23 @@ mod tests {
         let lib_msg = Message::from(&response);
 
         // Verify the conversion
-        assert_eq!(lib_msg.role, MessageRole::Assistant);
-        match &lib_msg.content {
-            Some(Content::Text(text)) => assert_eq!(text, "I'm here to help!"),
-            _ => panic!("Expected text content"),
+        match &lib_msg {
+            Message::Assistant { content, tool_calls, metadata } => {
+                // Verify content
+                match content {
+                    Some(Content::Text(text)) => assert_eq!(text, "I'm here to help!"),
+                    _ => panic!("Expected text content"),
+                }
+                
+                // Verify no tool calls
+                assert!(tool_calls.is_empty());
+                
+                // Check metadata
+                assert_eq!(metadata["input_tokens"], 5);
+                assert_eq!(metadata["output_tokens"], 15);
+            }
+            _ => panic!("Expected Assistant variant"),
         }
-
-        // Check metadata
-        assert_eq!(lib_msg.metadata["input_tokens"], 5);
-        assert_eq!(lib_msg.metadata["output_tokens"], 15);
     }
 
     #[test]

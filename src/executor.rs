@@ -69,8 +69,8 @@ impl<M: ModelInfo> SingleRequestExecutor<M> {
         let message = match self.provider.parse(response_text) {
             Ok(msg) => {
                 info!("Successfully parsed response into message");
-                debug!("Message role: {:?}", msg.role);
-                trace!("Message content: {:?}", msg.content);
+                debug!("Message role: {}", msg.role_str());
+                // Message content is now accessed through pattern matching
                 msg
             },
             Err(e) => {

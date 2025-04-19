@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::message::{Content, ContentPart, Message, MessageRole};
+use crate::message::{Content, ContentPart, Message};
 use crate::provider::HTTPProvider;
 use crate::{Chat, ModelInfo};
 use reqwest::{Method, Request, Url};
@@ -225,7 +225,7 @@ impl<M: ModelInfo + OpenAIModelInfo> HTTPProvider<M> for OpenAIProvider {
         let message = Message::from(&openai_response);
 
         info!("Response parsed successfully");
-        trace!("Message content: {:?}", message.content);
+        trace!("Response message processed");
 
         Ok(message)
     }
@@ -270,7 +270,7 @@ impl OpenAIProvider {
         
         // Add conversation history
         for msg in &chat.history {
-            debug!("Converting message with role: {:?}", msg.role);
+            debug!("Converting message with role: {}", msg.role_str());
             messages.push(OpenAIMessage::from(msg));
         }
 
@@ -487,77 +487,95 @@ pub(crate) struct OpenAIError {
 /// Convert from our Message to OpenAI's message format
 impl From<&Message> for OpenAIMessage {
     fn from(msg: &Message) -> Self {
-        let role = match msg.role {
-            MessageRole::System => "system",
-            MessageRole::User => "user",
-            MessageRole::Assistant => "assistant",
-            MessageRole::Function => "function",
-            MessageRole::Tool => "tool",
+        let role = match msg {
+            Message::System { .. } => "system",
+            Message::User { .. } => "user",
+            Message::Assistant { .. } => "assistant",
+            Message::Tool { .. } => "tool",
         }.to_string();
 
-        let content = match &msg.content {
-            Some(Content::Text(text)) => Some(text.clone()),
-            Some(Content::Parts(parts)) => {
-                // For now, we just concatenate all text parts
-                // A more complete implementation would handle multimodal content
-                let combined_text = parts.iter()
-                    .filter_map(|part| match part {
-                        ContentPart::Text { text } => Some(text.clone()),
-                        _ => None,
-                    })
-                    .collect::<Vec<String>>()
-                    .join("\n");
-                
-                if combined_text.is_empty() {
-                    None
-                } else {
-                    Some(combined_text)
-                }
+        let (content, name, function_call, tool_calls, tool_call_id) = match msg {
+            Message::System { content, .. } => {
+                (Some(content.clone()), None, None, None, None)
             },
-            None => None,
-        };
-
-        // Convert function call if present
-        let function_call = if let Some(fc) = &msg.function_call {
-            Some(OpenAIFunctionCall {
-                name: fc.name.clone(),
-                arguments: fc.arguments.clone(),
-            })
-        } else {
-            None
-        };
-
-        // Convert tool calls if present
-        let tool_calls = if let Some(tcs) = &msg.tool_calls {
-            if !tcs.is_empty() {
-                let mut calls = Vec::with_capacity(tcs.len());
+            Message::User { content, name, .. } => {
+                let content_str = match content {
+                    Content::Text(text) => Some(text.clone()),
+                    Content::Parts(parts) => {
+                        // For text parts, concatenate them
+                        let combined_text = parts.iter()
+                            .filter_map(|part| match part {
+                                ContentPart::Text { text } => Some(text.clone()),
+                                _ => None,
+                            })
+                            .collect::<Vec<String>>()
+                            .join("\n");
+                        
+                        if combined_text.is_empty() {
+                            None
+                        } else {
+                            Some(combined_text)
+                        }
+                    },
+                };
+                (content_str, name.clone(), None, None, None)
+            },
+            Message::Assistant { content, tool_calls, .. } => {
+                let content_str = match content {
+                    Some(Content::Text(text)) => Some(text.clone()),
+                    Some(Content::Parts(parts)) => {
+                        // For text parts, concatenate them
+                        let combined_text = parts.iter()
+                            .filter_map(|part| match part {
+                                ContentPart::Text { text } => Some(text.clone()),
+                                _ => None,
+                            })
+                            .collect::<Vec<String>>()
+                            .join("\n");
+                        
+                        if combined_text.is_empty() {
+                            None
+                        } else {
+                            Some(combined_text)
+                        }
+                    },
+                    None => None,
+                };
                 
-                for tc in tcs {
-                    calls.push(OpenAIToolCall {
-                        id: tc.id.clone(),
-                        r#type: tc.tool_type.clone(),
-                        function: OpenAIFunctionCall {
-                            name: tc.function.name.clone(),
-                            arguments: tc.function.arguments.clone(),
-                        },
-                    });
-                }
+                // Convert tool calls if present
+                let openai_tool_calls = if !tool_calls.is_empty() {
+                    let mut calls = Vec::with_capacity(tool_calls.len());
+                    
+                    for tc in tool_calls {
+                        calls.push(OpenAIToolCall {
+                            id: tc.id.clone(),
+                            r#type: tc.tool_type.clone(),
+                            function: OpenAIFunctionCall {
+                                name: tc.function.name.clone(),
+                                arguments: tc.function.arguments.clone(),
+                            },
+                        });
+                    }
+                    
+                    Some(calls)
+                } else {
+                    None
+                };
                 
-                Some(calls)
-            } else {
-                None
-            }
-        } else {
-            None
+                (content_str, None, None, openai_tool_calls, None)
+            },
+            Message::Tool { tool_call_id, content, .. } => {
+                (Some(content.clone()), None, None, None, Some(tool_call_id.clone()))
+            },
         };
 
         OpenAIMessage {
             role,
             content,
             function_call,
-            name: msg.name.clone(),
+            name,
             tool_calls,
-            tool_call_id: msg.tool_call_id.clone(),
+            tool_call_id,
         }
     }
 }
@@ -573,61 +591,118 @@ impl From<&OpenAIResponse> for Message {
         let choice = &response.choices[0];
         let message = &choice.message;
 
-        let role = match message.role.as_str() {
-            "assistant" => MessageRole::Assistant,
-            "user" => MessageRole::User,
-            "system" => MessageRole::System,
-            "function" => MessageRole::Function,
-            "tool" => MessageRole::Tool,
-            _ => MessageRole::User, // Default to user for unknown roles
-        };
-
-        let content = message.content.as_ref().map(|text| Content::Text(text.clone()));
-
-        // Convert tool calls if present
-        let tool_calls = if let Some(openai_tool_calls) = &message.tool_calls {
-            if !openai_tool_calls.is_empty() {
-                let mut tool_calls = Vec::with_capacity(openai_tool_calls.len());
+        // Create appropriate Message variant based on role
+        let mut msg = match message.role.as_str() {
+            "assistant" => {
+                let content = message.content.as_ref().map(|text| Content::Text(text.clone()));
                 
-                for call in openai_tool_calls {
+                // Handle tool calls if present
+                if let Some(openai_tool_calls) = &message.tool_calls {
+                    if !openai_tool_calls.is_empty() {
+                        let mut tool_calls = Vec::with_capacity(openai_tool_calls.len());
+                        
+                        for call in openai_tool_calls {
+                            let tool_call = crate::message::ToolCall {
+                                id: call.id.clone(),
+                                tool_type: call.r#type.clone(),
+                                function: crate::message::Function {
+                                    name: call.function.name.clone(),
+                                    arguments: call.function.arguments.clone(),
+                                },
+                            };
+                            tool_calls.push(tool_call);
+                        }
+                        
+                        Message::Assistant {
+                            content,
+                            tool_calls,
+                            metadata: Default::default(),
+                        }
+                    } else {
+                        // No tool calls
+                        if let Some(Content::Text(text)) = content {
+                            Message::assistant(text)
+                        } else {
+                            Message::Assistant {
+                                content,
+                                tool_calls: Vec::new(),
+                                metadata: Default::default(),
+                            }
+                        }
+                    }
+                } else if let Some(fc) = &message.function_call {
+                    // Handle legacy function_call (older OpenAI API)
                     let tool_call = crate::message::ToolCall {
-                        id: call.id.clone(),
-                        tool_type: call.r#type.clone(),
-                        function: crate::message::FunctionCall {
-                            name: call.function.name.clone(),
-                            arguments: call.function.arguments.clone(),
+                        id: format!("legacy_function_{}", fc.name),
+                        tool_type: "function".to_string(),
+                        function: crate::message::Function {
+                            name: fc.name.clone(),
+                            arguments: fc.arguments.clone(),
                         },
                     };
-                    tool_calls.push(tool_call);
+                    
+                    Message::Assistant {
+                        content,
+                        tool_calls: vec![tool_call],
+                        metadata: Default::default(),
+                    }
+                } else {
+                    // Simple content only
+                    if let Some(Content::Text(text)) = content {
+                        Message::assistant(text)
+                    } else {
+                        Message::Assistant {
+                            content,
+                            tool_calls: Vec::new(),
+                            metadata: Default::default(),
+                        }
+                    }
                 }
-                
-                Some(tool_calls)
-            } else {
-                None
+            },
+            "user" => {
+                if let Some(name) = &message.name {
+                    if let Some(content) = &message.content {
+                        Message::user_with_name(name, content)
+                    } else {
+                        Message::user_with_name(name, "")
+                    }
+                } else if let Some(content) = &message.content {
+                    Message::user(content)
+                } else {
+                    Message::user("")
+                }
+            },
+            "system" => {
+                if let Some(content) = &message.content {
+                    Message::system(content)
+                } else {
+                    Message::system("")
+                }
+            },
+            "tool" => {
+                if let Some(tool_call_id) = &message.tool_call_id {
+                    if let Some(content) = &message.content {
+                        Message::tool(tool_call_id, content)
+                    } else {
+                        Message::tool(tool_call_id, "")
+                    }
+                } else {
+                    // This shouldn't happen, but fall back to user message
+                    if let Some(content) = &message.content {
+                        Message::user(content)
+                    } else {
+                        Message::user("")
+                    }
+                }
+            },
+            _ => {
+                // Default to user for unknown roles
+                if let Some(content) = &message.content {
+                    Message::user(content)
+                } else {
+                    Message::user("")
+                }
             }
-        } else {
-            None
-        };
-
-        // Convert function call if present and no tool calls (older OpenAI API)
-        let function_call = if tool_calls.is_none() && message.function_call.is_some() {
-            let fc = message.function_call.as_ref().unwrap();
-            Some(crate::message::FunctionCall {
-                name: fc.name.clone(),
-                arguments: fc.arguments.clone(),
-            })
-        } else {
-            None
-        };
-
-        let mut msg = Message {
-            role,
-            content,
-            name: message.name.clone(),
-            function_call,
-            tool_calls,
-            tool_call_id: message.tool_call_id.clone(),
-            metadata: Default::default(),
         };
 
         // Add token usage information to metadata if available
@@ -676,6 +751,32 @@ mod tests {
         
         assert_eq!(openai_msg.role, "assistant");
         assert_eq!(openai_msg.content, Some("I can help with that.".to_string()));
+        
+        // Test assistant message with tool calls
+        let tool_call = crate::message::ToolCall {
+            id: "tool_123".to_string(),
+            tool_type: "function".to_string(),
+            function: crate::message::Function {
+                name: "get_weather".to_string(),
+                arguments: "{\"location\":\"San Francisco\"}".to_string(),
+            },
+        };
+        
+        let msg = Message::Assistant {
+            content: Some(Content::Text("I'll check the weather".to_string())),
+            tool_calls: vec![tool_call],
+            metadata: Default::default(),
+        };
+        
+        let openai_msg = OpenAIMessage::from(&msg);
+        
+        assert_eq!(openai_msg.role, "assistant");
+        assert_eq!(openai_msg.content, Some("I'll check the weather".to_string()));
+        assert!(openai_msg.tool_calls.is_some());
+        let tool_calls = openai_msg.tool_calls.unwrap();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].id, "tool_123");
+        assert_eq!(tool_calls[0].function.name, "get_weather");
     }
     
     #[test]

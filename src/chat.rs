@@ -55,8 +55,23 @@ where
     pub fn with_history(mut self, history: Vec<Message>) -> Self {
         // Recompute token counter from scratch
         for msg in &history {
-            if let Some(Content::Text(text)) = &msg.content {
-                self.token_counter.observe(text);
+            match msg {
+                Message::System { content, .. } => {
+                    self.token_counter.observe(content);
+                },
+                Message::User { content, .. } => {
+                    if let Content::Text(text) = content {
+                        self.token_counter.observe(text);
+                    }
+                },
+                Message::Assistant { content, .. } => {
+                    if let Some(Content::Text(text)) = content {
+                        self.token_counter.observe(text);
+                    }
+                },
+                Message::Tool { content, .. } => {
+                    self.token_counter.observe(content);
+                }
             }
         }
         self.history = history;
@@ -64,7 +79,7 @@ where
     }
 
     /// Sets compactor and returns self for method chaining
-    pub fn with_compactor<C: ChatHistoryCompactor>(mut self, comp: C) -> Self {
+    pub fn with_compactor<C: ChatHistoryCompactor + 'static>(mut self, comp: C) -> Self {
         self.compactor = Box::new(comp);
         self.trim_to_context_window();
         self
@@ -85,8 +100,24 @@ where
 
     /// Adds a message to the conversation history
     pub fn push_message(&mut self, msg: Message) {
-        if let Some(Content::Text(text)) = &msg.content {
-            self.token_counter.observe(text);
+        // Count tokens based on message type
+        match &msg {
+            Message::System { content, .. } => {
+                self.token_counter.observe(content);
+            },
+            Message::User { content, .. } => {
+                if let Content::Text(text) = content {
+                    self.token_counter.observe(text);
+                }
+            },
+            Message::Assistant { content, .. } => {
+                if let Some(Content::Text(text)) = content {
+                    self.token_counter.observe(text);
+                }
+            },
+            Message::Tool { content, .. } => {
+                self.token_counter.observe(content);
+            }
         }
         self.history.push(msg);
         self.trim_to_context_window();
@@ -98,7 +129,7 @@ where
     }
 
     /// Sets a new compactor strategy at runtime
-    pub fn set_compactor<C: ChatHistoryCompactor>(&mut self, comp: C) {
+    pub fn set_compactor<C: ChatHistoryCompactor + 'static>(&mut self, comp: C) {
         self.compactor = Box::new(comp);
         self.trim_to_context_window();
     }
@@ -139,12 +170,21 @@ where
     /// This function examines an assistant message for tool calls, executes them
     /// using the current toolbox, and adds the tool response messages to the history.
     pub fn process_tool_calls(&mut self, assistant_message: &Message) -> crate::error::Result<()> {
-        // If there's no toolbox or no tool calls, there's nothing to do
-        if self.toolbox.is_none() || assistant_message.tool_calls.is_none() {
+        // If there's no toolbox, there's nothing to do
+        if self.toolbox.is_none() {
             return Ok(());
         }
         
-        let tool_calls = assistant_message.tool_calls.as_ref().unwrap();
+        // Extract tool calls if any
+        let tool_calls = match assistant_message {
+            Message::Assistant { tool_calls, .. } => {
+                if tool_calls.is_empty() {
+                    return Ok(());
+                }
+                tool_calls
+            },
+            _ => return Ok(()),
+        };
         
         // Process each tool call and collect responses first
         let mut responses = Vec::new();

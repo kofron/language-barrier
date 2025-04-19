@@ -102,8 +102,8 @@ impl ContentPart {
     /// let image_url = ImageUrl::new("https://example.com/image.jpg");
     /// let part = ContentPart::image_url(image_url);
     /// ```
-    pub fn image_url(image_url: impl Into<String>) -> Self {
-        ContentPart::ImageUrl { image_url: ImageUrl::new(image_url) }
+    pub fn image_url(url: impl Into<String>) -> Self {
+        ContentPart::ImageUrl { image_url: ImageUrl::new(url) }
     }
 
     /// Returns true if the part is empty
@@ -445,7 +445,7 @@ mod tests {
 
         let parts_content = Content::parts(vec![
             ContentPart::text("Hello"),
-            ContentPart::image_url(ImageUrl::new("https://example.com/image.jpg")),
+            ContentPart::image_url("https://example.com/image.jpg"),
         ]);
         let serialized = serde_json::to_string(&parts_content).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&serialized).unwrap();

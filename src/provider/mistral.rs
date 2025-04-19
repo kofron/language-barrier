@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::message::{Content, ContentPart, Message, MessageRole};
+use crate::message::{Content, ContentPart, Message};
 use crate::provider::HTTPProvider;
 use crate::{Chat, ModelInfo};
 use reqwest::{Method, Request, Url};
@@ -212,7 +212,7 @@ impl<M: ModelInfo + MistralModelInfo> HTTPProvider<M> for MistralProvider {
         let message = Message::from(&mistral_response);
 
         info!("Response parsed successfully");
-        trace!("Message content: {:?}", message.content);
+        trace!("Response message processed");
 
         Ok(message)
     }
@@ -251,7 +251,7 @@ impl MistralProvider {
         
         // Add conversation history
         for msg in &chat.history {
-            debug!("Converting message with role: {:?}", msg.role);
+            debug!("Converting message with role: {}", msg.role_str());
             messages.push(MistralMessage::from(msg));
         }
 
@@ -460,60 +460,81 @@ pub(crate) struct MistralError {
 /// Convert from our Message to Mistral's message format
 impl From<&Message> for MistralMessage {
     fn from(msg: &Message) -> Self {
-        let role = match msg.role {
-            MessageRole::System => "system",
-            MessageRole::User => "user",
-            MessageRole::Assistant => "assistant",
-            MessageRole::Function => "function",
-            MessageRole::Tool => "tool",
+        let role = match msg {
+            Message::System { .. } => "system",
+            Message::User { .. } => "user",
+            Message::Assistant { .. } => "assistant",
+            Message::Tool { .. } => "tool",
         }.to_string();
 
-        let content = match &msg.content {
-            Some(Content::Text(text)) => text.clone(),
-            Some(Content::Parts(parts)) => {
-                // For now, we just concatenate all text parts
-                // A more complete implementation would handle multimodal content
-                parts.iter()
-                    .filter_map(|part| match part {
-                        ContentPart::Text { text } => Some(text.clone()),
-                        _ => None,
-                    })
-                    .collect::<Vec<String>>()
-                    .join("\n")
+        let (content, name, tool_calls, tool_call_id) = match msg {
+            Message::System { content, .. } => (content.clone(), None, None, None),
+            Message::User { content, name, .. } => {
+                let content_str = match content {
+                    Content::Text(text) => text.clone(),
+                    Content::Parts(parts) => {
+                        // For now, we just concatenate all text parts
+                        // A more complete implementation would handle multimodal content
+                        parts.iter()
+                            .filter_map(|part| match part {
+                                ContentPart::Text { text } => Some(text.clone()),
+                                _ => None,
+                            })
+                            .collect::<Vec<String>>()
+                            .join("\n")
+                    }
+                };
+                (content_str, name.clone(), None, None)
             },
-            None => String::new(),
-        };
-
-        // Convert tool calls if present
-        let tool_calls = if let Some(tcs) = &msg.tool_calls {
-            if !tcs.is_empty() {
-                let mut calls = Vec::with_capacity(tcs.len());
+            Message::Assistant { content, tool_calls, .. } => {
+                let content_str = match content {
+                    Some(Content::Text(text)) => text.clone(),
+                    Some(Content::Parts(parts)) => {
+                        // Concatenate text parts
+                        parts.iter()
+                            .filter_map(|part| match part {
+                                ContentPart::Text { text } => Some(text.clone()),
+                                _ => None,
+                            })
+                            .collect::<Vec<String>>()
+                            .join("\n")
+                    },
+                    None => String::new(),
+                };
                 
-                for tc in tcs {
-                    calls.push(MistralToolCall {
-                        id: tc.id.clone(),
-                        r#type: tc.tool_type.clone(),
-                        function: MistralFunctionCall {
-                            name: tc.function.name.clone(),
-                            arguments: tc.function.arguments.clone(),
-                        },
-                    });
-                }
+                // Convert tool calls if present
+                let mistral_tool_calls = if !tool_calls.is_empty() {
+                    let mut calls = Vec::with_capacity(tool_calls.len());
+                    
+                    for tc in tool_calls {
+                        calls.push(MistralToolCall {
+                            id: tc.id.clone(),
+                            r#type: tc.tool_type.clone(),
+                            function: MistralFunctionCall {
+                                name: tc.function.name.clone(),
+                                arguments: tc.function.arguments.clone(),
+                            },
+                        });
+                    }
+                    
+                    Some(calls)
+                } else {
+                    None
+                };
                 
-                Some(calls)
-            } else {
-                None
-            }
-        } else {
-            None
+                (content_str, None, mistral_tool_calls, None)
+            },
+            Message::Tool { tool_call_id, content, .. } => {
+                (content.clone(), None, None, Some(tool_call_id.clone()))
+            },
         };
 
         MistralMessage {
             role,
             content,
-            name: msg.name.clone(),
+            name,
             tool_calls,
-            tool_call_id: msg.tool_call_id.clone(),
+            tool_call_id,
         }
     }
 }
@@ -529,50 +550,75 @@ impl From<&MistralResponse> for Message {
         let choice = &response.choices[0];
         let message = &choice.message;
 
-        let role = match message.role.as_str() {
-            "assistant" => MessageRole::Assistant,
-            "user" => MessageRole::User,
-            "system" => MessageRole::System,
-            "function" => MessageRole::Function,
-            "tool" => MessageRole::Tool,
-            _ => MessageRole::User, // Default to user for unknown roles
-        };
-
-        let content = Some(Content::Text(message.content.clone()));
-
-        // Convert tool calls if present
-        let tool_calls = if let Some(mistral_tool_calls) = &message.tool_calls {
-            if !mistral_tool_calls.is_empty() {
-                let mut tool_calls = Vec::with_capacity(mistral_tool_calls.len());
+        // Create appropriate Message variant based on role
+        let mut msg = match message.role.as_str() {
+            "assistant" => {
+                let content = Some(Content::Text(message.content.clone()));
                 
-                for call in mistral_tool_calls {
-                    let tool_call = crate::message::ToolCall {
-                        id: call.id.clone(),
-                        tool_type: call.r#type.clone(),
-                        function: crate::message::FunctionCall {
-                            name: call.function.name.clone(),
-                            arguments: call.function.arguments.clone(),
-                        },
-                    };
-                    tool_calls.push(tool_call);
+                // Convert tool calls if present
+                if let Some(mistral_tool_calls) = &message.tool_calls {
+                    if !mistral_tool_calls.is_empty() {
+                        let mut tool_calls = Vec::with_capacity(mistral_tool_calls.len());
+                        
+                        for call in mistral_tool_calls {
+                            let tool_call = crate::message::ToolCall {
+                                id: call.id.clone(),
+                                tool_type: call.r#type.clone(),
+                                function: crate::message::Function {
+                                    name: call.function.name.clone(),
+                                    arguments: call.function.arguments.clone(),
+                                },
+                            };
+                            tool_calls.push(tool_call);
+                        }
+                        
+                        Message::Assistant {
+                            content,
+                            tool_calls,
+                            metadata: Default::default(),
+                        }
+                    } else {
+                        // No tool calls, just content
+                        if let Some(Content::Text(text)) = content {
+                            Message::assistant(text)
+                        } else {
+                            Message::Assistant {
+                                content,
+                                tool_calls: Vec::new(),
+                                metadata: Default::default(),
+                            }
+                        }
+                    }
+                } else {
+                    // No tool calls
+                    if let Some(Content::Text(text)) = content {
+                        Message::assistant(text)
+                    } else {
+                        Message::Assistant {
+                            content,
+                            tool_calls: Vec::new(),
+                            metadata: Default::default(),
+                        }
+                    }
                 }
-                
-                Some(tool_calls)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        let mut msg = Message {
-            role,
-            content,
-            name: message.name.clone(),
-            function_call: None,
-            tool_calls,
-            tool_call_id: message.tool_call_id.clone(),
-            metadata: Default::default(),
+            },
+            "user" => {
+                if let Some(name) = &message.name {
+                    Message::user_with_name(name, message.content.clone())
+                } else {
+                    Message::user(message.content.clone())
+                }
+            },
+            "system" => Message::system(message.content.clone()),
+            "tool" => {
+                if let Some(tool_call_id) = &message.tool_call_id {
+                    Message::tool(tool_call_id, message.content.clone())
+                } else {
+                    // This shouldn't happen, but fall back to user message
+                    Message::user(message.content.clone())
+                }
+            },
+            _ => Message::user(message.content.clone()), // Default to user for unknown roles
         };
 
         // Add token usage information to metadata if available

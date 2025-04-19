@@ -384,15 +384,15 @@ where
     ///
     /// Returns an error if parsing any of the tool calls fails.
     pub fn tool_calls(&self) -> Result<Vec<T>> {
-        match &self.message.tool_calls {
-            Some(calls) => {
-                let mut result = Vec::with_capacity(calls.len());
-                for call in calls {
+        match self.message {
+            Message::Assistant { tool_calls, .. } => {
+                let mut result = Vec::with_capacity(tool_calls.len());
+                for call in tool_calls {
                     result.push(self.toolbox.parse_tool_call(call)?);
                 }
                 Ok(result)
             }
-            None => Ok(Vec::new()),
+            _ => Ok(Vec::new()),
         }
     }
     
@@ -405,6 +405,9 @@ where
     ///
     /// `true` if the message contains at least one tool call, `false` otherwise.
     pub fn has_tool_calls(&self) -> bool {
-        self.message.tool_calls.as_ref().map_or(false, |calls| !calls.is_empty())
+        match self.message {
+            Message::Assistant { tool_calls, .. } => !tool_calls.is_empty(),
+            _ => false,
+        }
     }
 }

@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::message::{Content, ContentPart, Message, MessageRole};
+use crate::message::{Content, ContentPart, Message};
 use crate::provider::HTTPProvider;
 use crate::{Chat, ModelInfo};
 use reqwest::{Method, Request, Url};
@@ -205,7 +205,7 @@ impl<M: ModelInfo + GeminiModelInfo> HTTPProvider<M> for GeminiProvider {
         let message = Message::from(&gemini_response);
 
         info!("Response parsed successfully");
-        trace!("Message content: {:?}", message.content);
+        trace!("Response message processed");
 
         Ok(message)
     }
@@ -247,16 +247,19 @@ impl GeminiProvider {
         // Convert messages to contents
         debug!("Converting messages to Gemini format");
         let mut contents: Vec<GeminiContent> = Vec::new();
-        let mut current_role: Option<MessageRole> = None;
+        let mut current_role_str: Option<&'static str> = None;
         let mut current_parts: Vec<GeminiPart> = Vec::new();
 
         for msg in &chat.history {
+            // Get the current role string
+            let msg_role_str = msg.role_str();
+            
             // If role changes, finish the current content and start a new one
-            if current_role.is_some() && current_role != Some(msg.role) {
+            if current_role_str.is_some() && current_role_str != Some(msg_role_str) {
                 if !current_parts.is_empty() {
-                    let role = match current_role {
-                        Some(MessageRole::User) => Some("user".to_string()),
-                        Some(MessageRole::Assistant) => Some("model".to_string()),
+                    let role = match current_role_str {
+                        Some("user") => Some("user".to_string()),
+                        Some("assistant") => Some("model".to_string()),
                         _ => None,
                     };
 
@@ -267,37 +270,68 @@ impl GeminiProvider {
                 }
             }
 
-            current_role = Some(msg.role);
+            current_role_str = Some(msg_role_str);
 
-            // Convert message content to parts
-            match &msg.content {
-                Some(Content::Text(text)) => {
-                    current_parts.push(GeminiPart::text(text.clone()));
+            // Convert message content to parts based on the message variant
+            match msg {
+                Message::System { content, .. } => {
+                    current_parts.push(GeminiPart::text(content.clone()));
                 }
-                Some(Content::Parts(parts)) => {
-                    for part in parts {
-                        match part {
-                            ContentPart::Text { text } => {
-                                current_parts.push(GeminiPart::text(text.clone()));
-                            }
-                            ContentPart::ImageUrl { image_url } => {
-                                current_parts.push(GeminiPart::inline_data(
-                                    image_url.url.clone(),
-                                    "image/jpeg".to_string(),
-                                ));
+                Message::User { content, .. } => match content {
+                    Content::Text(text) => {
+                        current_parts.push(GeminiPart::text(text.clone()));
+                    }
+                    Content::Parts(parts) => {
+                        for part in parts {
+                            match part {
+                                ContentPart::Text { text } => {
+                                    current_parts.push(GeminiPart::text(text.clone()));
+                                }
+                                ContentPart::ImageUrl { image_url } => {
+                                    current_parts.push(GeminiPart::inline_data(
+                                        image_url.url.clone(),
+                                        "image/jpeg".to_string(),
+                                    ));
+                                }
                             }
                         }
                     }
+                },
+                Message::Assistant { content, .. } => {
+                    if let Some(content_data) = content {
+                        match content_data {
+                            Content::Text(text) => {
+                                current_parts.push(GeminiPart::text(text.clone()));
+                            }
+                            Content::Parts(parts) => {
+                                for part in parts {
+                                    match part {
+                                        ContentPart::Text { text } => {
+                                            current_parts.push(GeminiPart::text(text.clone()));
+                                        }
+                                        ContentPart::ImageUrl { image_url } => {
+                                            current_parts.push(GeminiPart::inline_data(
+                                                image_url.url.clone(),
+                                                "image/jpeg".to_string(),
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                Message::Tool { content, .. } => {
+                    current_parts.push(GeminiPart::text(content.clone()));
                 }
-                None => {}
             }
         }
 
         // Add any remaining parts
         if !current_parts.is_empty() {
-            let role = match current_role {
-                Some(MessageRole::User) => Some("user".to_string()),
-                Some(MessageRole::Assistant) => Some("model".to_string()),
+            let role = match current_role_str {
+                Some("user") => Some("user".to_string()),
+                Some("assistant") => Some("model".to_string()),
                 _ => None,
             };
 
@@ -601,7 +635,7 @@ impl From<&GeminiResponse> for Message {
                 let tool_call = crate::message::ToolCall {
                     id: tool_id,
                     tool_type: "function".to_string(),
-                    function: crate::message::FunctionCall {
+                    function: crate::message::Function {
                         name: function_call.name.clone(),
                         arguments: args_str,
                     },
@@ -637,14 +671,24 @@ impl From<&GeminiResponse> for Message {
             None
         };
 
-        let mut msg = Message {
-            role: MessageRole::Assistant,
-            content,
-            name: None,
-            function_call: None,
-            tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
-            tool_call_id: None,
-            metadata: Default::default(),
+        // Create a new assistant message with appropriate content and tool calls
+        let mut msg = if !tool_calls.is_empty() {
+            // If we have tool calls
+            Message::Assistant {
+                content,
+                tool_calls,
+                metadata: Default::default(),
+            }
+        } else if let Some(Content::Text(text)) = content {
+            // Simple text response
+            Message::assistant(text)
+        } else {
+            // Other content types (multipart or none)
+            Message::Assistant {
+                content,
+                tool_calls: Vec::new(),
+                metadata: Default::default(),
+            }
         };
 
         // Add usage info if available
