@@ -1,8 +1,8 @@
-use language_barrier::SingleRequestExecutor;
-use language_barrier::model::{Claude, Gemini, GPT, Sonnet35Version};
-use language_barrier::provider::HTTPProvider;
-use language_barrier::{Chat, Message};
-use language_barrier::message::{Content, ContentPart, ToolCall, Function};
+use language_barrier_core::SingleRequestExecutor;
+use language_barrier_core::model::{Claude, Gemini, GPT, Sonnet35Version};
+use language_barrier_core::provider::HTTPProvider;
+use language_barrier_core::{Chat, Message};
+use language_barrier_core::message::{Content, ContentPart, ToolCall, Function};
 use tracing::{debug, info, warn, error, Level};
 
 // Import our helper modules
@@ -10,9 +10,9 @@ mod test_utils;
 mod test_tools;
 
 use test_utils::{
-    setup_tracing, 
-    get_anthropic_provider, 
-    get_openai_provider, 
+    setup_tracing,
+    get_anthropic_provider,
+    get_openai_provider,
     get_gemini_provider
 };
 use test_tools::TestToolbox;
@@ -21,7 +21,7 @@ use test_tools::TestToolbox;
 async fn test_anthropic_request_creation() {
     setup_tracing(Level::DEBUG);
     info!("Starting test_anthropic_request_creation");
-    
+
     // Create an Anthropic provider with default configuration
     let provider = get_anthropic_provider().unwrap_or_default();
 
@@ -105,7 +105,7 @@ async fn test_anthropic_integration_with_executor() {
     info!("Verifying response");
     debug!("Response role: {:?}", response.role_str());
     assert!(matches!(response, Message::Assistant { .. }));
-    
+
     // Get content from the response
     let content = match &response {
         Message::Assistant { content, .. } => content,
@@ -121,7 +121,7 @@ async fn test_anthropic_integration_with_executor() {
     // Verify token usage metadata is present
     match &response {
         Message::Assistant { metadata, .. } => {
-            debug!("Token usage - input: {:?}, output: {:?}", 
+            debug!("Token usage - input: {:?}, output: {:?}",
                 metadata.get("input_tokens"),
                 metadata.get("output_tokens"));
             assert!(metadata.contains_key("input_tokens"));
@@ -135,7 +135,7 @@ async fn test_anthropic_integration_with_executor() {
 async fn test_anthropic_tool_response_parsing() {
     setup_tracing(Level::DEBUG);
     info!("Starting test_anthropic_tool_response_parsing");
-    
+
     // Create an Anthropic provider with default configuration
     let provider = get_anthropic_provider().unwrap_or_default();
 
@@ -168,10 +168,10 @@ async fn test_anthropic_tool_response_parsing() {
 
     // Parse the response using the provider
     let message = provider.parse(response_json.to_string()).unwrap();
-    
+
     // Verify it parsed correctly
     assert!(matches!(message, Message::Assistant { .. }));
-    
+
     // Check for text content and tool calls
     match &message {
         Message::Assistant { content, tool_calls, metadata } => {
@@ -191,20 +191,20 @@ async fn test_anthropic_tool_response_parsing() {
                 },
                 None => panic!("Expected content to be present"),
             }
-            
+
             // Verify tool calls are present
             assert!(!tool_calls.is_empty());
             assert_eq!(tool_calls.len(), 1);
-            
+
             // Check first tool call
             let tool_call = &tool_calls[0];
             assert_eq!(tool_call.id, "tool_call_123");
             assert_eq!(tool_call.function.name, "get_weather");
-            
+
             // Parse arguments to verify
             let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments).unwrap();
             assert_eq!(args["location"], "San Francisco");
-            
+
             // Verify token usage metadata is present
             assert_eq!(metadata["input_tokens"], 25);
             assert_eq!(metadata["output_tokens"], 42);
@@ -217,14 +217,14 @@ async fn test_anthropic_tool_response_parsing() {
 async fn test_anthropic_tool_result_conversion() {
     setup_tracing(Level::DEBUG);
     info!("Starting test_anthropic_tool_result_conversion");
-    
+
     // Create a provider to use
     let provider = get_anthropic_provider().unwrap_or_default();
-    
+
     // Create a sequence with a tool message
     let mut chat = Chat::new(Claude::Haiku3)
         .with_system_prompt("You are a helpful assistant.");
-    
+
     // Create a tool call
     let tool_call = ToolCall {
         id: "call_123".to_string(),
@@ -234,28 +234,28 @@ async fn test_anthropic_tool_result_conversion() {
             arguments: r#"{"location":"San Francisco"}"#.to_string(),
         },
     };
-    
+
     // Add an assistant message with a tool call
     let assistant_message = Message::assistant_with_tool_calls(vec![tool_call]);
     chat.add_message(assistant_message);
-    
+
     // Add a tool response
     let tool_message = Message::tool("call_123", "Weather in San Francisco: Sunny, 72°F");
     chat.add_message(tool_message);
-    
+
     // Create a request using the provider
     let request = provider.accept(chat).unwrap();
-    
+
     // Get the request body as a string
     let body_bytes = request.body().unwrap().as_bytes().unwrap();
     let body_str = std::str::from_utf8(body_bytes).unwrap();
-    
+
     // Verify the request contains tool_result with the right content
     assert!(body_str.contains("\"tool_result\""));
-    
+
     // Anthropic API uses tool_use_id instead of tool_call_id
     assert!(body_str.contains("\"tool_use_id\":\"call_123\""));
-    
+
     assert!(body_str.contains("Weather in San Francisco: Sunny, 72°F"));
 }
 
@@ -263,7 +263,7 @@ async fn test_anthropic_tool_result_conversion() {
 async fn test_anthropic_tools_request_creation() {
     setup_tracing(Level::DEBUG);
     info!("Starting test_anthropic_tools_request_creation");
-    
+
     // Create an Anthropic provider with default configuration
     let provider = get_anthropic_provider().unwrap_or_default();
 
@@ -285,12 +285,12 @@ async fn test_anthropic_tools_request_creation() {
     // Get the request body as a string
     let body_bytes = request.body().unwrap().as_bytes().unwrap();
     let body_str = std::str::from_utf8(body_bytes).unwrap();
-    
+
     // Check that the request includes tools
     assert!(body_str.contains("\"tools\""));
     assert!(body_str.contains("\"get_weather\""));
     assert!(body_str.contains("\"location\""));
-    
+
     // Verify request properties
     assert_eq!(request.method(), "POST");
     assert_eq!(
@@ -309,15 +309,15 @@ async fn test_anthropic_tools_request_creation() {
 async fn test_chat_process_tool_calls() {
     setup_tracing(Level::DEBUG);
     info!("Starting test_chat_process_tool_calls");
-    
+
     // Create a chat with toolbox
     let mut chat = Chat::new(Claude::Haiku3)
         .with_system_prompt("You are a helpful assistant.")
         .with_toolbox(TestToolbox);
-    
+
     // Add a user message
     chat.add_message(Message::user("What's the weather in San Francisco?"));
-    
+
     // Create a tool call
     let tool_call = ToolCall {
         id: "call_123".to_string(),
@@ -327,23 +327,23 @@ async fn test_chat_process_tool_calls() {
             arguments: r#"{"location":"San Francisco"}"#.to_string(),
         },
     };
-    
+
     // Create an assistant message with a tool call
     let assistant_message = Message::assistant_with_tool_calls(vec![tool_call]);
-    
+
     // Add the assistant message to chat
     chat.add_message(assistant_message.clone());
-    
+
     // Process the tool calls
     chat.process_tool_calls(&assistant_message).unwrap();
-    
+
     // Verify that a tool message was added
     assert_eq!(chat.history.len(), 3); // User, Assistant, Tool
-    
+
     // Check the tool message
     let tool_message = &chat.history[2];
     assert!(matches!(tool_message, Message::Tool { .. }));
-    
+
     // Extract and verify the tool message details
     match tool_message {
         Message::Tool { tool_call_id, content, .. } => {
@@ -358,7 +358,7 @@ async fn test_chat_process_tool_calls() {
 async fn test_gemini_request_creation() {
     setup_tracing(Level::DEBUG);
     info!("Starting test_gemini_request_creation");
-    
+
     // Create a Gemini provider with default configuration
     let provider = get_gemini_provider().unwrap_or_default();
 
@@ -434,7 +434,7 @@ async fn test_gemini_integration_with_executor() {
     info!("Verifying response");
     debug!("Response role: {:?}", response.role_str());
     assert!(matches!(response, Message::Assistant { .. }));
-    
+
     // Get content from the response
     let content = match &response {
         Message::Assistant { content, .. } => content,
@@ -451,7 +451,7 @@ async fn test_gemini_integration_with_executor() {
     match &response {
         Message::Assistant { metadata, .. } => {
             debug!("Token usage metadata: {:?}", metadata);
-            assert!(metadata.contains_key("prompt_tokens") || 
+            assert!(metadata.contains_key("prompt_tokens") ||
                    metadata.contains_key("total_tokens"));
         },
         _ => panic!("Expected assistant message"),
@@ -462,7 +462,7 @@ async fn test_gemini_integration_with_executor() {
 async fn test_openai_request_creation() {
     setup_tracing(Level::DEBUG);
     info!("Starting test_openai_request_creation");
-    
+
     // Create an OpenAI provider with default configuration
     let provider = get_openai_provider().unwrap_or_default();
 
@@ -541,7 +541,7 @@ async fn test_openai_integration_with_executor() {
     info!("Verifying response");
     debug!("Response role: {:?}", response.role_str());
     assert!(matches!(response, Message::Assistant { .. }));
-    
+
     // Get content from the response
     let content = match &response {
         Message::Assistant { content, .. } => content,
@@ -558,7 +558,7 @@ async fn test_openai_integration_with_executor() {
     match &response {
         Message::Assistant { metadata, .. } => {
             debug!("Token usage metadata: {:?}", metadata);
-            assert!(metadata.contains_key("prompt_tokens") || 
+            assert!(metadata.contains_key("prompt_tokens") ||
                    metadata.contains_key("total_tokens"));
         },
         _ => panic!("Expected assistant message"),

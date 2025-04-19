@@ -1,12 +1,12 @@
 use dotenv::dotenv;
-use language_barrier::message::{Content, ContentPart, Message};
-use language_barrier::provider::anthropic::{AnthropicConfig, AnthropicProvider};
-use language_barrier::provider::gemini::{GeminiConfig, GeminiProvider};
-use language_barrier::provider::mistral::{MistralConfig, MistralProvider};
-use language_barrier::provider::openai::{OpenAIConfig, OpenAIProvider};
+use language_barrier_core::message::{Content, ContentPart, Message};
+use language_barrier_core::provider::anthropic::{AnthropicConfig, AnthropicProvider};
+use language_barrier_core::provider::gemini::{GeminiConfig, GeminiProvider};
+use language_barrier_core::provider::mistral::{MistralConfig, MistralProvider};
+use language_barrier_core::provider::openai::{OpenAIConfig, OpenAIProvider};
 use std::env;
 use tracing::Level;
-use tracing_subscriber::{EnvFilter, fmt, prelude::*, registry};
+use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
 
 /// Helper function to set up tracing for tests
 pub fn setup_tracing(level: Level) {

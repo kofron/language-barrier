@@ -1,9 +1,9 @@
 use dotenv::dotenv;
-use language_barrier::SingleRequestExecutor;
-use language_barrier::model::{Claude, Sonnet35Version};
-use language_barrier::provider::anthropic::{AnthropicConfig, AnthropicProvider};
-use language_barrier::{Chat, Message, Tool, ToolDescription, Toolbox, Result};
-use language_barrier::message::{Content, ContentPart};
+use language_barrier_core::SingleRequestExecutor;
+use language_barrier_core::model::{Claude, Sonnet35Version};
+use language_barrier_core::provider::anthropic::{AnthropicConfig, AnthropicProvider};
+use language_barrier_core::{Chat, Message, Tool, ToolDescription, Toolbox, Result};
+use language_barrier_core::message::{Content, ContentPart};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -56,7 +56,7 @@ impl Toolbox for TestToolbox {
                     request.location, units
                 ))
             }
-            _ => Err(language_barrier::Error::ToolNotFound(name.to_string())),
+            _ => Err(language_barrier_core::Error::ToolNotFound(name.to_string())),
         }
     }
 }
@@ -72,9 +72,9 @@ async fn test_multi_turn_conversation_with_tools() {
             .with_line_number(true))
         .with(EnvFilter::from_default_env()
             .add_directive(Level::TRACE.into()));
-    
+
     tracing::subscriber::set_global_default(subscriber).ok();
-    
+
     info!("Starting test_multi_turn_conversation_with_tools");
 
     // Load environment variables from .env file if available
@@ -101,19 +101,19 @@ async fn test_multi_turn_conversation_with_tools() {
     let executor = SingleRequestExecutor::new(provider);
 
     // Create a chat with tools
-    let mut chat = Chat::new(Claude::Sonnet35 { 
-        version: Sonnet35Version::V2 
+    let mut chat = Chat::new(Claude::Sonnet35 {
+        version: Sonnet35Version::V2
     })
     .with_system_prompt("You are a helpful AI assistant that can provide weather information.")
     .with_max_output_tokens(1000)
     .with_toolbox(TestToolbox);
 
     // Start a multi-turn conversation
-    
+
     // First message
     info!("Sending first user message");
     chat.add_message(Message::user("What's the weather like in San Francisco?"));
-    
+
     // Get first response
     let response = match executor.send(chat).await {
         Ok(resp) => {
@@ -130,7 +130,7 @@ async fn test_multi_turn_conversation_with_tools() {
             return; // Skip the rest of the test
         }
     };
-    
+
     // The response should include a tool call for weather
     match &response {
         Message::Assistant { tool_calls, .. } => {
@@ -138,28 +138,28 @@ async fn test_multi_turn_conversation_with_tools() {
         },
         _ => panic!("Expected assistant message"),
     }
-    
+
     // Process tool calls
-    let mut updated_chat = Chat::new(Claude::Sonnet35 { 
-        version: Sonnet35Version::V2 
+    let mut updated_chat = Chat::new(Claude::Sonnet35 {
+        version: Sonnet35Version::V2
     })
     .with_system_prompt("You are a helpful AI assistant that can provide weather information.")
     .with_max_output_tokens(1000)
     .with_toolbox(TestToolbox);
-    
+
     // Add the original user question
     updated_chat.add_message(Message::user("What's the weather like in San Francisco?"));
-    
+
     // Add the assistant's response
     updated_chat.add_message(response.clone());
-    
+
     // Process the tool calls to add tool response messages
     updated_chat.process_tool_calls(&response).unwrap();
-    
+
     // Ask a follow-up question
     info!("Sending follow-up question");
     updated_chat.add_message(Message::user("How about the weather in New York?"));
-    
+
     // Get response to follow-up
     let follow_up_response = match executor.send(updated_chat).await {
         Ok(resp) => {
@@ -176,7 +176,7 @@ async fn test_multi_turn_conversation_with_tools() {
             return; // Skip the rest of the test
         }
     };
-    
+
     // The follow-up response should also include a tool call
     match &follow_up_response {
         Message::Assistant { tool_calls, .. } => {
@@ -184,7 +184,7 @@ async fn test_multi_turn_conversation_with_tools() {
         },
         _ => panic!("Expected assistant message"),
     }
-    
+
     // Inspect the follow-up response content to verify it references New York
     let references_new_york = match &follow_up_response {
         Message::Assistant { content, tool_calls, .. } => {
@@ -210,7 +210,7 @@ async fn test_multi_turn_conversation_with_tools() {
         },
         _ => panic!("Expected assistant message"),
     };
-    
+
     // Alternative check in tool calls for New York reference
     let tool_calls_reference_new_york = match &follow_up_response {
         Message::Assistant { tool_calls, .. } => {
@@ -221,17 +221,17 @@ async fn test_multi_turn_conversation_with_tools() {
         },
         _ => panic!("Expected assistant message"),
     };
-    
-    assert!(references_new_york || tool_calls_reference_new_york, 
+
+    assert!(references_new_york || tool_calls_reference_new_york,
             "Follow-up response should reference New York");
-    
+
     // Check that the model remembered previous context - it shouldn't repeat the San Francisco weather
     // when we asked about New York
     let response_text = match &follow_up_response {
         Message::Assistant { content: Some(Content::Text(text)), .. } => text.clone(),
         _ => String::new(),
     };
-    
-    assert!(!response_text.contains("San Francisco"), 
+
+    assert!(!response_text.contains("San Francisco"),
         "Follow-up response should not repeat San Francisco weather");
 }

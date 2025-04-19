@@ -1,4 +1,4 @@
-use language_barrier::{Tool, Toolbox, ToolDescription, Result};
+use language_barrier_core::{Result, Tool, ToolDescription, Toolbox};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -75,7 +75,7 @@ impl Toolbox for TestToolbox {
                     "Weather in {}: 22 degrees {}, partly cloudy with a chance of rain",
                     request.location, units
                 ))
-            },
+            }
             "calculate" => {
                 let request: CalculatorRequest = serde_json::from_value(arguments)?;
                 // Simple calculator that supports basic operations
@@ -84,8 +84,8 @@ impl Toolbox for TestToolbox {
                     Err(err) => format!("Error calculating {}: {}", request.expression, err),
                 };
                 Ok(result)
-            },
-            _ => Err(language_barrier::Error::ToolNotFound(name.to_string())),
+            }
+            _ => Err(language_barrier_core::Error::ToolNotFound(name.to_string())),
         }
     }
 }
@@ -93,7 +93,7 @@ impl Toolbox for TestToolbox {
 // Simple expression evaluator for calculator tool
 fn simple_eval(expr: &str) -> Result<f64> {
     let expr = expr.trim();
-    
+
     if expr.contains('+') {
         let parts: Vec<&str> = expr.split('+').collect();
         if parts.len() == 2 {
@@ -121,16 +121,21 @@ fn simple_eval(expr: &str) -> Result<f64> {
             let a = simple_eval(parts[0])?;
             let b = simple_eval(parts[1])?;
             if b == 0.0 {
-                return Err(language_barrier::Error::Other("Division by zero".into()));
+                return Err(language_barrier_core::Error::Other(
+                    "Division by zero".into(),
+                ));
             }
             return Ok(a / b);
         }
     }
-    
+
     // If no operators, try to parse as a number
     match expr.trim().parse::<f64>() {
         Ok(num) => Ok(num),
-        Err(_) => Err(language_barrier::Error::Other(format!("Invalid expression: {}", expr))),
+        Err(_) => Err(language_barrier_core::Error::Other(format!(
+            "Invalid expression: {}",
+            expr
+        ))),
     }
 }
 
@@ -144,13 +149,11 @@ impl Toolbox for WeatherToolbox {
         let weather_schema = schemars::schema_for!(WeatherRequest);
         let weather_schema_value = serde_json::to_value(weather_schema.schema).unwrap();
 
-        vec![
-            ToolDescription {
-                name: "get_weather".to_string(),
-                description: "Get current weather for a location".to_string(),
-                parameters: weather_schema_value,
-            },
-        ]
+        vec![ToolDescription {
+            name: "get_weather".to_string(),
+            description: "Get current weather for a location".to_string(),
+            parameters: weather_schema_value,
+        }]
     }
 
     fn execute(&self, name: &str, arguments: Value) -> Result<String> {
@@ -162,8 +165,8 @@ impl Toolbox for WeatherToolbox {
                     "Weather in {}: 22 degrees {}, partly cloudy with a chance of rain",
                     request.location, units
                 ))
-            },
-            _ => Err(language_barrier::Error::ToolNotFound(name.to_string())),
+            }
+            _ => Err(language_barrier_core::Error::ToolNotFound(name.to_string())),
         }
     }
 }

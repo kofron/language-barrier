@@ -19,7 +19,7 @@ use crate::message::{Message, ToolCall};
 /// # Examples
 ///
 /// ```
-/// use language_barrier::Tool;
+/// use language_barrier_core::Tool;
 /// use schemars::JsonSchema;
 /// use serde::{Deserialize, Serialize};
 ///
@@ -85,7 +85,7 @@ pub struct ToolDescription {
 /// # Examples
 ///
 /// ```
-/// use language_barrier::{Tool, ToolDescription, Toolbox, Result};
+/// use language_barrier_core::{Tool, ToolDescription, Toolbox, Result};
 /// use schemars::JsonSchema;
 /// use serde::{Deserialize, Serialize};
 /// use serde_json::Value;
@@ -129,7 +129,7 @@ pub struct ToolDescription {
 ///                 let units = request.units.unwrap_or_else(|| "celsius".to_string());
 ///                 Ok(format!("Weather in {}: 22 degrees {}", request.location, units))
 ///             }
-///             _ => Err(language_barrier::Error::ToolNotFound(name.to_string())),
+///             _ => Err(language_barrier_core::Error::ToolNotFound(name.to_string())),
 ///         }
 ///     }
 /// }
@@ -141,7 +141,7 @@ pub trait Toolbox {
     /// Each description should include a name, human-readable description,
     /// and JSON schema for the tool's parameters.
     fn describe(&self) -> Vec<ToolDescription>;
-    
+
     /// Executes a tool call with the given input
     ///
     /// # Parameters
@@ -177,7 +177,7 @@ pub trait Toolbox {
 /// # Examples
 ///
 /// ```
-/// use language_barrier::{Tool, ToolCall, ToolDescription, Toolbox, TypedToolbox, Result};
+/// use language_barrier_core::{Tool, ToolCall, ToolDescription, Toolbox, TypedToolbox, Result};
 /// use schemars::JsonSchema;
 /// use serde::{Deserialize, Serialize};
 /// use serde_json::Value;
@@ -227,7 +227,7 @@ pub trait Toolbox {
 ///                 let request: WeatherRequest = serde_json::from_value(arguments)?;
 ///                 Ok(MyToolRequest::Weather(request))
 ///             }
-///             _ => Err(language_barrier::Error::ToolNotFound(name.clone())),
+///             _ => Err(language_barrier_core::Error::ToolNotFound(name.clone())),
 ///         }
 ///     }
 ///
@@ -259,7 +259,7 @@ pub trait TypedToolbox<T: DeserializeOwned>: Toolbox {
     ///
     /// Returns an error if parsing fails or if the tool is not recognized.
     fn parse_tool_call(&self, tool_call: &ToolCall) -> Result<T>;
-    
+
     /// Executes a typed tool request and returns a typed response
     ///
     /// This method executes a strongly typed tool request and returns a string
@@ -297,7 +297,7 @@ pub trait TypedToolbox<T: DeserializeOwned>: Toolbox {
 /// # Examples
 ///
 /// ```
-/// use language_barrier::{Message, ToolCall, ToolCallView, TypedToolbox};
+/// use language_barrier_core::{Message, ToolCall, ToolCallView, TypedToolbox};
 /// use serde::{Deserialize, Serialize};
 ///
 /// // Assuming MyToolbox and MyToolRequest are defined as in previous examples
@@ -309,13 +309,13 @@ pub trait TypedToolbox<T: DeserializeOwned>: Toolbox {
 ///
 /// impl TypedToolbox<MyToolRequest> for MyToolbox {
 ///     // Implementation details...
-///     # fn parse_tool_call(&self, _: &ToolCall) -> language_barrier::Result<MyToolRequest> { unimplemented!() }
-///     # fn execute_typed(&self, _: MyToolRequest) -> language_barrier::Result<String> { unimplemented!() }
+///     # fn parse_tool_call(&self, _: &ToolCall) -> language_barrier_core::Result<MyToolRequest> { unimplemented!() }
+///     # fn execute_typed(&self, _: MyToolRequest) -> language_barrier_core::Result<String> { unimplemented!() }
 /// }
 ///
-/// impl language_barrier::Toolbox for MyToolbox {
-///     # fn describe(&self) -> Vec<language_barrier::ToolDescription> { vec![] }
-///     # fn execute(&self, _: &str, _: serde_json::Value) -> language_barrier::Result<String> { unimplemented!() }
+/// impl language_barrier_core::Toolbox for MyToolbox {
+///     # fn describe(&self) -> Vec<language_barrier_core::ToolDescription> { vec![] }
+///     # fn execute(&self, _: &str, _: serde_json::Value) -> language_barrier_core::Result<String> { unimplemented!() }
 /// }
 ///
 /// // Create a message with tool calls
@@ -363,13 +363,13 @@ where
     ///
     /// A new `ToolCallView` instance that provides typed access to the tool calls in the message.
     pub fn new(toolbox: &'a TB, message: &'a Message) -> Self {
-        Self { 
-            toolbox, 
+        Self {
+            toolbox,
             message,
             _phantom: std::marker::PhantomData,
         }
     }
-    
+
     /// Returns typed tool calls from this message
     ///
     /// This method extracts all tool calls from the message and parses them into
@@ -395,7 +395,7 @@ where
             _ => Ok(Vec::new()),
         }
     }
-    
+
     /// Returns true if this message contains tool calls
     ///
     /// This method is a convenient way to check if a message contains any tool calls

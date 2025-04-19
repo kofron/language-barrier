@@ -22,7 +22,7 @@ jobs:
       uses: Swatinem/rust-cache@v2
     
     - name: Run all tests (including API integration tests)
-      run: cargo test --verbose --all-features
+      run: cargo test --workspace --verbose --all-features
       env:
         RUST_BACKTRACE: 1
         # Add your LLM API keys as secrets

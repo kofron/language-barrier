@@ -40,7 +40,7 @@ impl GeminiProvider {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::provider::gemini::GeminiProvider;
+    /// use language_barrier_core::provider::gemini::GeminiProvider;
     ///
     /// let provider = GeminiProvider::new();
     /// ```
@@ -59,7 +59,7 @@ impl GeminiProvider {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::provider::gemini::{GeminiProvider, GeminiConfig};
+    /// use language_barrier_core::provider::gemini::{GeminiProvider, GeminiConfig};
     ///
     /// let config = GeminiConfig {
     ///     api_key: "your-api-key".to_string(),
@@ -253,9 +253,12 @@ impl GeminiProvider {
         for msg in &chat.history {
             // Get the current role string
             let msg_role_str = msg.role_str();
-            
+
             // If role changes, finish the current content and start a new one
-            if current_role_str.is_some() && current_role_str != Some(msg_role_str) && !current_parts.is_empty() {
+            if current_role_str.is_some()
+                && current_role_str != Some(msg_role_str)
+                && !current_parts.is_empty()
+            {
                 let role = match current_role_str {
                     Some("user") => Some("user".to_string()),
                     Some("assistant") => Some("model".to_string()),
@@ -318,12 +321,17 @@ impl GeminiProvider {
                             }
                         }
                     }
-                },
-                Message::Tool { tool_call_id, content, .. } => {
+                }
+                Message::Tool {
+                    tool_call_id,
+                    content,
+                    ..
+                } => {
                     // For Gemini, include both the tool call ID and the content
-                    current_parts.push(GeminiPart::text(
-                        format!("Tool result for call {}: {}", tool_call_id, content)
-                    ));
+                    current_parts.push(GeminiPart::text(format!(
+                        "Tool result for call {}: {}",
+                        tool_call_id, content
+                    )));
                 }
             }
         }
@@ -356,8 +364,11 @@ impl GeminiProvider {
         // Add tools if present
         let tools = if chat.has_toolbox() {
             let tool_descriptions = chat.tool_descriptions();
-            debug!("Converting {} tool descriptions to Gemini format", tool_descriptions.len());
-            
+            debug!(
+                "Converting {} tool descriptions to Gemini format",
+                tool_descriptions.len()
+            );
+
             if !tool_descriptions.is_empty() {
                 // Gemini uses a slightly different format with functionDeclarations
                 let function_declarations = tool_descriptions
@@ -368,7 +379,7 @@ impl GeminiProvider {
                         parameters: desc.parameters,
                     })
                     .collect();
-                
+
                 Some(vec![GeminiTool {
                     function_declarations,
                 }])
@@ -404,7 +415,7 @@ pub(crate) struct GeminiPart {
     /// The inline data (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub inline_data: Option<GeminiInlineData>,
-    
+
     /// The function call (optional)
     #[serde(skip_serializing_if = "Option::is_none", rename = "functionCall")]
     pub function_call: Option<GeminiFunctionCall>,
@@ -630,8 +641,8 @@ impl From<&GeminiResponse> for Message {
                 tool_call_id_counter += 1;
                 let tool_id = format!("gemini_call_{}", tool_call_id_counter);
 
-                let args_str = serde_json::to_string(&function_call.args)
-                    .unwrap_or_else(|_| "{}".to_string());
+                let args_str =
+                    serde_json::to_string(&function_call.args).unwrap_or_else(|_| "{}".to_string());
 
                 let tool_call = crate::message::ToolCall {
                     id: tool_id,

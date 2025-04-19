@@ -40,7 +40,7 @@ impl MistralProvider {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::provider::mistral::MistralProvider;
+    /// use language_barrier_core::provider::mistral::MistralProvider;
     ///
     /// let provider = MistralProvider::new();
     /// ```
@@ -59,7 +59,7 @@ impl MistralProvider {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::provider::mistral::{MistralProvider, MistralConfig};
+    /// use language_barrier_core::provider::mistral::{MistralProvider, MistralConfig};
     ///
     /// let config = MistralConfig {
     ///     api_key: "your-api-key".to_string(),
@@ -112,7 +112,7 @@ impl<M: ModelInfo + MistralModelInfo> HTTPProvider<M> for MistralProvider {
 
         // Set headers
         debug!("Setting request headers");
-        
+
         // API key as bearer token
         let auth_header = match format!("Bearer {}", self.config.api_key).parse() {
             Ok(header) => header,
@@ -131,8 +131,10 @@ impl<M: ModelInfo + MistralModelInfo> HTTPProvider<M> for MistralProvider {
         };
 
         request.headers_mut().insert("Authorization", auth_header);
-        request.headers_mut().insert("Content-Type", content_type_header);
-        
+        request
+            .headers_mut()
+            .insert("Content-Type", content_type_header);
+
         trace!("Request headers set: {:#?}", request.headers());
 
         // Create the request payload
@@ -175,7 +177,8 @@ impl<M: ModelInfo + MistralModelInfo> HTTPProvider<M> for MistralProvider {
         trace!("Raw response: {}", raw_response_text);
 
         // First try to parse as an error response
-        if let Ok(error_response) = serde_json::from_str::<MistralErrorResponse>(&raw_response_text) {
+        if let Ok(error_response) = serde_json::from_str::<MistralErrorResponse>(&raw_response_text)
+        {
             if error_response.error.is_some() {
                 let error = error_response.error.unwrap();
                 error!("Mistral API returned an error: {}", error.message);
@@ -192,11 +195,16 @@ impl<M: ModelInfo + MistralModelInfo> HTTPProvider<M> for MistralProvider {
                 debug!("Response model: {}", response.model);
                 if !response.choices.is_empty() {
                     debug!("Number of choices: {}", response.choices.len());
-                    debug!("First choice finish reason: {:?}", response.choices[0].finish_reason);
+                    debug!(
+                        "First choice finish reason: {:?}",
+                        response.choices[0].finish_reason
+                    );
                 }
                 if let Some(usage) = &response.usage {
-                    debug!("Token usage - prompt: {}, completion: {}, total: {}", 
-                        usage.prompt_tokens, usage.completion_tokens, usage.total_tokens);
+                    debug!(
+                        "Token usage - prompt: {}, completion: {}, total: {}",
+                        usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
+                    );
                 }
                 response
             }
@@ -224,7 +232,10 @@ impl MistralProvider {
     /// This method converts the Chat's messages and settings into a Mistral-specific
     /// format for the API request.
     #[instrument(skip(self, chat), level = "debug")]
-    fn create_request_payload<M: ModelInfo + MistralModelInfo>(&self, chat: &Chat<M>) -> Result<MistralRequest> {
+    fn create_request_payload<M: ModelInfo + MistralModelInfo>(
+        &self,
+        chat: &Chat<M>,
+    ) -> Result<MistralRequest> {
         info!("Creating request payload for chat with Mistral model");
         debug!("System prompt length: {}", chat.system_prompt.len());
         debug!("Messages in history: {}", chat.history.len());
@@ -236,7 +247,7 @@ impl MistralProvider {
         // Convert all messages including system prompt
         debug!("Converting messages to Mistral format");
         let mut messages: Vec<MistralMessage> = Vec::new();
-        
+
         // Add system prompt if present
         if !chat.system_prompt.is_empty() {
             debug!("Adding system prompt");
@@ -248,7 +259,7 @@ impl MistralProvider {
                 tool_call_id: None,
             });
         }
-        
+
         // Add conversation history
         for msg in &chat.history {
             debug!("Converting message with role: {}", msg.role_str());
@@ -260,8 +271,11 @@ impl MistralProvider {
         // Add tools if present
         let tools = if chat.has_toolbox() {
             let tool_descriptions = chat.tool_descriptions();
-            debug!("Converting {} tool descriptions to Mistral format", tool_descriptions.len());
-            
+            debug!(
+                "Converting {} tool descriptions to Mistral format",
+                tool_descriptions.len()
+            );
+
             if !tool_descriptions.is_empty() {
                 Some(
                     tool_descriptions
@@ -274,7 +288,7 @@ impl MistralProvider {
                                 parameters: desc.parameters,
                             },
                         })
-                        .collect()
+                        .collect(),
                 )
             } else {
                 None
@@ -285,8 +299,12 @@ impl MistralProvider {
         };
 
         // Create the tool choice setting
-        let tool_choice = if tools.is_some() { Some("auto".to_string()) } else { None };
-        
+        let tool_choice = if tools.is_some() {
+            Some("auto".to_string())
+        } else {
+            None
+        };
+
         // Create the request
         debug!("Creating MistralRequest");
         let request = MistralRequest {
@@ -403,7 +421,7 @@ pub(crate) struct MistralRequest {
 pub(crate) struct MistralResponse {
     /// Response ID
     pub id: String,
-    /// Object type 
+    /// Object type
     pub object: String,
     /// Creation timestamp
     pub created: u64,
@@ -465,7 +483,8 @@ impl From<&Message> for MistralMessage {
             Message::User { .. } => "user",
             Message::Assistant { .. } => "assistant",
             Message::Tool { .. } => "tool",
-        }.to_string();
+        }
+        .to_string();
 
         let (content, name, tool_calls, tool_call_id) = match msg {
             Message::System { content, .. } => (content.clone(), None, None, None),
@@ -475,7 +494,8 @@ impl From<&Message> for MistralMessage {
                     Content::Parts(parts) => {
                         // For now, we just concatenate all text parts
                         // A more complete implementation would handle multimodal content
-                        parts.iter()
+                        parts
+                            .iter()
                             .filter_map(|part| match part {
                                 ContentPart::Text { text } => Some(text.clone()),
                                 _ => None,
@@ -485,27 +505,32 @@ impl From<&Message> for MistralMessage {
                     }
                 };
                 (content_str, name.clone(), None, None)
-            },
-            Message::Assistant { content, tool_calls, .. } => {
+            }
+            Message::Assistant {
+                content,
+                tool_calls,
+                ..
+            } => {
                 let content_str = match content {
                     Some(Content::Text(text)) => text.clone(),
                     Some(Content::Parts(parts)) => {
                         // Concatenate text parts
-                        parts.iter()
+                        parts
+                            .iter()
                             .filter_map(|part| match part {
                                 ContentPart::Text { text } => Some(text.clone()),
                                 _ => None,
                             })
                             .collect::<Vec<String>>()
                             .join("\n")
-                    },
+                    }
                     None => String::new(),
                 };
-                
+
                 // Convert tool calls if present
                 let mistral_tool_calls = if !tool_calls.is_empty() {
                     let mut calls = Vec::with_capacity(tool_calls.len());
-                    
+
                     for tc in tool_calls {
                         calls.push(MistralToolCall {
                             id: tc.id.clone(),
@@ -516,17 +541,19 @@ impl From<&Message> for MistralMessage {
                             },
                         });
                     }
-                    
+
                     Some(calls)
                 } else {
                     None
                 };
-                
+
                 (content_str, None, mistral_tool_calls, None)
-            },
-            Message::Tool { tool_call_id, content, .. } => {
-                (content.clone(), None, None, Some(tool_call_id.clone()))
-            },
+            }
+            Message::Tool {
+                tool_call_id,
+                content,
+                ..
+            } => (content.clone(), None, None, Some(tool_call_id.clone())),
         };
 
         MistralMessage {
@@ -554,12 +581,12 @@ impl From<&MistralResponse> for Message {
         let mut msg = match message.role.as_str() {
             "assistant" => {
                 let content = Some(Content::Text(message.content.clone()));
-                
+
                 // Convert tool calls if present
                 if let Some(mistral_tool_calls) = &message.tool_calls {
                     if !mistral_tool_calls.is_empty() {
                         let mut tool_calls = Vec::with_capacity(mistral_tool_calls.len());
-                        
+
                         for call in mistral_tool_calls {
                             let tool_call = crate::message::ToolCall {
                                 id: call.id.clone(),
@@ -571,7 +598,7 @@ impl From<&MistralResponse> for Message {
                             };
                             tool_calls.push(tool_call);
                         }
-                        
+
                         Message::Assistant {
                             content,
                             tool_calls,
@@ -601,14 +628,14 @@ impl From<&MistralResponse> for Message {
                         }
                     }
                 }
-            },
+            }
             "user" => {
                 if let Some(name) = &message.name {
                     Message::user_with_name(name, message.content.clone())
                 } else {
                     Message::user(message.content.clone())
                 }
-            },
+            }
             "system" => Message::system(message.content.clone()),
             "tool" => {
                 if let Some(tool_call_id) = &message.tool_call_id {
@@ -617,7 +644,7 @@ impl From<&MistralResponse> for Message {
                     // This shouldn't happen, but fall back to user message
                     Message::user(message.content.clone())
                 }
-            },
+            }
             _ => Message::user(message.content.clone()), // Default to user for unknown roles
         };
 
@@ -644,31 +671,31 @@ impl From<&MistralResponse> for Message {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_message_conversion() {
         // Test simple text message
         let msg = Message::user("Hello, world!");
         let mistral_msg = MistralMessage::from(&msg);
-        
+
         assert_eq!(mistral_msg.role, "user");
         assert_eq!(mistral_msg.content, "Hello, world!");
-        
+
         // Test system message
         let msg = Message::system("You are a helpful assistant.");
         let mistral_msg = MistralMessage::from(&msg);
-        
+
         assert_eq!(mistral_msg.role, "system");
         assert_eq!(mistral_msg.content, "You are a helpful assistant.");
-        
+
         // Test assistant message
         let msg = Message::assistant("I can help with that.");
         let mistral_msg = MistralMessage::from(&msg);
-        
+
         assert_eq!(mistral_msg.role, "assistant");
         assert_eq!(mistral_msg.content, "I can help with that.");
     }
-    
+
     #[test]
     fn test_error_response_parsing() {
         let error_json = r#"{
@@ -678,7 +705,7 @@ mod tests {
                 "code": "model_not_found"
             }
         }"#;
-        
+
         let error_response: MistralErrorResponse = serde_json::from_str(error_json).unwrap();
         assert!(error_response.error.is_some());
         let error = error_response.error.unwrap();

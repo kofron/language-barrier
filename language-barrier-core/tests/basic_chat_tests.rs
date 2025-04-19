@@ -1,12 +1,12 @@
 use dotenv::dotenv;
-use language_barrier::SingleRequestExecutor;
-use language_barrier::model::{Claude, Gemini, GPT, Mistral, Sonnet35Version};
-use language_barrier::provider::HTTPProvider;
-use language_barrier::provider::anthropic::{AnthropicConfig, AnthropicProvider};
-use language_barrier::provider::gemini::{GeminiConfig, GeminiProvider};
-use language_barrier::provider::mistral::{MistralConfig, MistralProvider};
-use language_barrier::provider::openai::{OpenAIConfig, OpenAIProvider};
-use language_barrier::{Chat, Message};
+use language_barrier_core::SingleRequestExecutor;
+use language_barrier_core::model::{Claude, Gemini, GPT, Mistral, Sonnet35Version};
+use language_barrier_core::provider::HTTPProvider;
+use language_barrier_core::provider::anthropic::{AnthropicConfig, AnthropicProvider};
+use language_barrier_core::provider::gemini::{GeminiConfig, GeminiProvider};
+use language_barrier_core::provider::mistral::{MistralConfig, MistralProvider};
+use language_barrier_core::provider::openai::{OpenAIConfig, OpenAIProvider};
+use language_barrier_core::{Chat, Message};
 use std::env;
 use tracing::{debug, info, warn, Level};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
@@ -22,7 +22,7 @@ fn setup_tracing() {
         .with(EnvFilter::from_default_env()
             .add_directive(Level::TRACE.into())  // Maximum verbosity
             .add_directive("reqwest=info".parse().unwrap())); // Lower verbosity for reqwest
-    
+
     let _ = tracing::subscriber::set_global_default(subscriber);
 }
 
@@ -31,7 +31,7 @@ fn setup_tracing() {
 async fn test_request_creation() {
     setup_tracing();
     info!("Starting test_request_creation for all providers");
-    
+
     // Test Anthropic request creation
     {
         info!("Testing Anthropic request creation");
@@ -41,7 +41,7 @@ async fn test_request_creation() {
             .with_system_prompt("You are a helpful AI assistant.")
             .with_max_output_tokens(1000);
         chat.add_message(Message::user("What is the capital of France?"));
-        
+
         let request = provider.accept(chat).unwrap();
         assert_eq!(request.method(), "POST");
         assert_eq!(
@@ -55,7 +55,7 @@ async fn test_request_creation() {
             "application/json"
         );
     }
-    
+
     // Test OpenAI request creation
     {
         info!("Testing OpenAI request creation");
@@ -65,7 +65,7 @@ async fn test_request_creation() {
             .with_system_prompt("You are a helpful AI assistant.")
             .with_max_output_tokens(1000);
         chat.add_message(Message::user("What is the capital of France?"));
-        
+
         let request = provider.accept(chat).unwrap();
         assert_eq!(request.method(), "POST");
         assert_eq!(
@@ -78,7 +78,7 @@ async fn test_request_creation() {
             "application/json"
         );
     }
-    
+
     // Test Gemini request creation
     {
         info!("Testing Gemini request creation");
@@ -88,7 +88,7 @@ async fn test_request_creation() {
             .with_system_prompt("You are a helpful AI assistant.")
             .with_max_output_tokens(1000);
         chat.add_message(Message::user("What is the capital of France?"));
-        
+
         let request = provider.accept(chat).unwrap();
         assert_eq!(request.method(), "POST");
         assert!(request.url().as_str().contains("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"));
@@ -98,7 +98,7 @@ async fn test_request_creation() {
             "application/json"
         );
     }
-    
+
     // Test Mistral request creation
     {
         info!("Testing Mistral request creation");
@@ -108,7 +108,7 @@ async fn test_request_creation() {
             .with_system_prompt("You are a helpful AI assistant.")
             .with_max_output_tokens(1000);
         chat.add_message(Message::user("What is the capital of France?"));
-        
+
         let request = provider.accept(chat).unwrap();
         assert_eq!(request.method(), "POST");
         assert_eq!(
@@ -128,10 +128,10 @@ async fn test_request_creation() {
 async fn test_basic_chat_integration() {
     setup_tracing();
     info!("Starting test_basic_chat_integration");
-    
+
     // Load environment variables
     dotenv().ok();
-    
+
     // Test with Anthropic if credentials available
     if let Ok(api_key) = env::var("ANTHROPIC_API_KEY") {
         if !api_key.is_empty() {
@@ -143,14 +143,14 @@ async fn test_basic_chat_integration() {
             };
             let provider = AnthropicProvider::with_config(config);
             let executor = SingleRequestExecutor::new(provider);
-            
+
             let model = Claude::Sonnet35 { version: Sonnet35Version::V2 };
             let mut chat = Chat::new(model)
                 .with_system_prompt("You are a helpful AI assistant that provides very short answers.")
                 .with_max_output_tokens(100);
-            
+
             chat.add_message(Message::user("What is the capital of France?"));
-            
+
             if let Ok(response) = executor.send(chat).await {
                 verify_chat_response(&response);
             } else {
@@ -158,7 +158,7 @@ async fn test_basic_chat_integration() {
             }
         }
     }
-    
+
     // Test with OpenAI if credentials available
     if let Ok(api_key) = env::var("OPENAI_API_KEY") {
         if !api_key.is_empty() {
@@ -170,14 +170,14 @@ async fn test_basic_chat_integration() {
             };
             let provider = OpenAIProvider::with_config(config);
             let executor = SingleRequestExecutor::new(provider);
-            
+
             let model = GPT::GPT4o;
             let mut chat = Chat::new(model)
                 .with_system_prompt("You are a helpful AI assistant that provides very short answers.")
                 .with_max_output_tokens(100);
-            
+
             chat.add_message(Message::user("What is the capital of France?"));
-            
+
             if let Ok(response) = executor.send(chat).await {
                 verify_chat_response(&response);
             } else {
@@ -185,7 +185,7 @@ async fn test_basic_chat_integration() {
             }
         }
     }
-    
+
     // Test with Gemini if credentials available
     if let Ok(api_key) = env::var("GEMINI_API_KEY") {
         if !api_key.is_empty() {
@@ -196,14 +196,14 @@ async fn test_basic_chat_integration() {
             };
             let provider = GeminiProvider::with_config(config);
             let executor = SingleRequestExecutor::new(provider);
-            
+
             let model = Gemini::Flash20;
             let mut chat = Chat::new(model)
                 .with_system_prompt("You are a helpful AI assistant that provides very short answers.")
                 .with_max_output_tokens(100);
-            
+
             chat.add_message(Message::user("What is the capital of France?"));
-            
+
             if let Ok(response) = executor.send(chat).await {
                 verify_chat_response(&response);
             } else {
@@ -211,7 +211,7 @@ async fn test_basic_chat_integration() {
             }
         }
     }
-    
+
     // Test with Mistral if credentials available
     if let Ok(api_key) = env::var("MISTRAL_API_KEY") {
         if !api_key.is_empty() {
@@ -222,14 +222,14 @@ async fn test_basic_chat_integration() {
             };
             let provider = MistralProvider::with_config(config);
             let executor = SingleRequestExecutor::new(provider);
-            
+
             let model = Mistral::Small;
             let mut chat = Chat::new(model)
                 .with_system_prompt("You are a helpful AI assistant that provides very short answers.")
                 .with_max_output_tokens(100);
-            
+
             chat.add_message(Message::user("What is the capital of France?"));
-            
+
             if let Ok(response) = executor.send(chat).await {
                 verify_chat_response(&response);
             } else {
@@ -242,21 +242,21 @@ async fn test_basic_chat_integration() {
 // Helper function to verify chat response format
 fn verify_chat_response(response: &Message) {
     debug!("Verifying response: {:?}", response);
-    
+
     // Check that it's an assistant message
     assert!(matches!(response, Message::Assistant { .. }));
-    
+
     // Get content from the response
     match response {
         Message::Assistant { content, metadata, .. } => {
             // Check content exists
             assert!(content.is_some());
-            
+
             // Verify token usage metadata is present (field names might differ by provider)
             debug!("Token usage metadata: {:?}", metadata);
             assert!(
-                metadata.contains_key("input_tokens") || 
-                metadata.contains_key("prompt_tokens") || 
+                metadata.contains_key("input_tokens") ||
+                metadata.contains_key("prompt_tokens") ||
                 metadata.contains_key("total_tokens")
             );
         },

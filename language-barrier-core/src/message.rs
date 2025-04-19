@@ -17,7 +17,7 @@ impl Content {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::message::Content;
+    /// use language_barrier_core::message::Content;
     ///
     /// let content = Content::text("Hello, world!");
     /// ```
@@ -30,7 +30,7 @@ impl Content {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::message::{Content, ContentPart};
+    /// use language_barrier_core::message::{Content, ContentPart};
     ///
     /// let parts = vec![ContentPart::text("Hello"), ContentPart::text("world")];
     /// let content = Content::parts(parts);
@@ -45,7 +45,7 @@ impl Content {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::message::Content;
+    /// use language_barrier_core::message::Content;
     ///
     /// let content = Content::text("");
     /// assert!(content.is_empty());
@@ -86,7 +86,7 @@ impl ContentPart {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::message::ContentPart;
+    /// use language_barrier_core::message::ContentPart;
     ///
     /// let part = ContentPart::text("Hello, world!");
     /// ```
@@ -99,12 +99,14 @@ impl ContentPart {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::message::ContentPart;
+    /// use language_barrier_core::message::ContentPart;
     ///
     /// let part = ContentPart::image_url("https://example.com/image.jpg");
     /// ```
     pub fn image_url(url: impl Into<String>) -> Self {
-        ContentPart::ImageUrl { image_url: ImageUrl::new(url) }
+        ContentPart::ImageUrl {
+            image_url: ImageUrl::new(url),
+        }
     }
 
     /// Returns true if the part is empty
@@ -112,7 +114,7 @@ impl ContentPart {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::message::ContentPart;
+    /// use language_barrier_core::message::ContentPart;
     ///
     /// let part = ContentPart::text("");
     /// assert!(part.is_empty());
@@ -145,7 +147,7 @@ impl ImageUrl {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::message::ImageUrl;
+    /// use language_barrier_core::message::ImageUrl;
     ///
     /// let image_url = ImageUrl::new("https://example.com/image.jpg");
     /// ```
@@ -161,7 +163,7 @@ impl ImageUrl {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::message::ImageUrl;
+    /// use language_barrier_core::message::ImageUrl;
     ///
     /// let image_url = ImageUrl::new("https://example.com/image.jpg")
     ///     .with_detail("high");
@@ -254,7 +256,7 @@ impl Message {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::message::Message;
+    /// use language_barrier_core::message::Message;
     ///
     /// let msg = Message::system("You are a helpful assistant.");
     /// ```
@@ -270,7 +272,7 @@ impl Message {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::message::Message;
+    /// use language_barrier_core::message::Message;
     ///
     /// let msg = Message::user("Hello, can you help me?");
     /// ```
@@ -281,13 +283,13 @@ impl Message {
             metadata: HashMap::new(),
         }
     }
-    
+
     /// Creates a new user message with a name
     ///
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::message::Message;
+    /// use language_barrier_core::message::Message;
     ///
     /// let msg = Message::user_with_name("John", "Hello, can you help me?");
     /// ```
@@ -304,7 +306,7 @@ impl Message {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::message::{Message, Content, ContentPart};
+    /// use language_barrier_core::message::{Message, Content, ContentPart};
     ///
     /// let parts = vec![
     ///     ContentPart::text("Look at this image:"),
@@ -326,7 +328,7 @@ impl Message {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::message::Message;
+    /// use language_barrier_core::message::Message;
     ///
     /// let msg = Message::assistant("I'm here to help you.");
     /// ```
@@ -343,7 +345,7 @@ impl Message {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::message::{Message, ToolCall, Function};
+    /// use language_barrier_core::message::{Message, ToolCall, Function};
     ///
     /// let tool_call = ToolCall {
     ///     id: "call_123".to_string(),
@@ -369,7 +371,7 @@ impl Message {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::message::Message;
+    /// use language_barrier_core::message::Message;
     ///
     /// let msg = Message::tool("tool123", "The result is 42.");
     /// ```
@@ -386,7 +388,7 @@ impl Message {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::message::Message;
+    /// use language_barrier_core::message::Message;
     ///
     /// let msg = Message::user("Hello");
     /// assert_eq!(msg.role_str(), "user");
@@ -406,7 +408,7 @@ impl Message {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::message::Message;
+    /// use language_barrier_core::message::Message;
     /// use serde_json::json;
     ///
     /// let msg = Message::user("Hello")
@@ -415,25 +417,51 @@ impl Message {
     #[must_use]
     pub fn with_metadata(self, key: impl Into<String>, value: serde_json::Value) -> Self {
         match self {
-            Message::System { content, mut metadata } => {
+            Message::System {
+                content,
+                mut metadata,
+            } => {
                 metadata.insert(key.into(), value);
                 Message::System { content, metadata }
             }
-            Message::User { content, name, mut metadata } => {
+            Message::User {
+                content,
+                name,
+                mut metadata,
+            } => {
                 metadata.insert(key.into(), value);
-                Message::User { content, name, metadata }
+                Message::User {
+                    content,
+                    name,
+                    metadata,
+                }
             }
-            Message::Assistant { content, tool_calls, mut metadata } => {
+            Message::Assistant {
+                content,
+                tool_calls,
+                mut metadata,
+            } => {
                 metadata.insert(key.into(), value);
-                Message::Assistant { content, tool_calls, metadata }
+                Message::Assistant {
+                    content,
+                    tool_calls,
+                    metadata,
+                }
             }
-            Message::Tool { tool_call_id, content, mut metadata } => {
+            Message::Tool {
+                tool_call_id,
+                content,
+                mut metadata,
+            } => {
                 metadata.insert(key.into(), value);
-                Message::Tool { tool_call_id, content, metadata }
+                Message::Tool {
+                    tool_call_id,
+                    content,
+                    metadata,
+                }
             }
         }
     }
-
 }
 
 #[cfg(test)]
@@ -467,14 +495,13 @@ mod tests {
 
         // Check externally tagged enum serialization
         assert_eq!(parsed["role"], "user");
-        
+
         // In the new format, content is a property within the User variant,
         // and for text content it's serialized as a string directly
         assert!(parsed.get("content").is_some());
-        
+
         // Test with metadata and name
-        let msg = Message::user_with_name("John", "Hello")
-            .with_metadata("priority", json!(5));
+        let msg = Message::user_with_name("John", "Hello").with_metadata("priority", json!(5));
         let serialized = serde_json::to_string(&msg).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&serialized).unwrap();
 
@@ -501,7 +528,11 @@ mod tests {
     fn test_user_message() {
         let msg = Message::user_with_name("John", "Hello");
         match msg {
-            Message::User { content, name, metadata } => {
+            Message::User {
+                content,
+                name,
+                metadata,
+            } => {
                 assert_eq!(content, Content::Text("Hello".to_string()));
                 assert_eq!(name, Some("John".to_string()));
                 assert!(metadata.is_empty());
@@ -514,7 +545,11 @@ mod tests {
     fn test_assistant_message() {
         let msg = Message::assistant("I'll help you");
         match msg {
-            Message::Assistant { content, tool_calls, metadata } => {
+            Message::Assistant {
+                content,
+                tool_calls,
+                metadata,
+            } => {
                 assert_eq!(content, Some(Content::Text("I'll help you".to_string())));
                 assert!(tool_calls.is_empty());
                 assert!(metadata.is_empty());
@@ -530,10 +565,14 @@ mod tests {
                 arguments: "{\"location\":\"San Francisco\"}".to_string(),
             },
         };
-        
+
         let msg = Message::assistant_with_tool_calls(vec![tool_call]);
         match msg {
-            Message::Assistant { content, tool_calls, metadata } => {
+            Message::Assistant {
+                content,
+                tool_calls,
+                metadata,
+            } => {
                 assert_eq!(content, None);
                 assert_eq!(tool_calls.len(), 1);
                 assert_eq!(tool_calls[0].id, "call_123");
@@ -547,7 +586,11 @@ mod tests {
     fn test_tool_message() {
         let msg = Message::tool("call_123", "The weather is sunny");
         match msg {
-            Message::Tool { tool_call_id, content, metadata } => {
+            Message::Tool {
+                tool_call_id,
+                content,
+                metadata,
+            } => {
                 assert_eq!(tool_call_id, "call_123");
                 assert_eq!(content, "The weather is sunny");
                 assert!(metadata.is_empty());

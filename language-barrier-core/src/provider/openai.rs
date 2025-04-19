@@ -43,7 +43,7 @@ impl OpenAIProvider {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::provider::openai::OpenAIProvider;
+    /// use language_barrier_core::provider::openai::OpenAIProvider;
     ///
     /// let provider = OpenAIProvider::new();
     /// ```
@@ -63,7 +63,7 @@ impl OpenAIProvider {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::provider::openai::{OpenAIProvider, OpenAIConfig};
+    /// use language_barrier_core::provider::openai::{OpenAIProvider, OpenAIConfig};
     ///
     /// let config = OpenAIConfig {
     ///     api_key: "your-api-key".to_string(),
@@ -113,7 +113,7 @@ impl<M: ModelInfo + OpenAIModelInfo> HTTPProvider<M> for OpenAIProvider {
 
         // Set headers
         debug!("Setting request headers");
-        
+
         // API key as bearer token
         let auth_header = match format!("Bearer {}", self.config.api_key).parse() {
             Ok(header) => header,
@@ -132,8 +132,10 @@ impl<M: ModelInfo + OpenAIModelInfo> HTTPProvider<M> for OpenAIProvider {
         };
 
         request.headers_mut().insert("Authorization", auth_header);
-        request.headers_mut().insert("Content-Type", content_type_header);
-        
+        request
+            .headers_mut()
+            .insert("Content-Type", content_type_header);
+
         // Add organization header if present
         if let Some(org) = &self.config.organization {
             match org.parse() {
@@ -190,7 +192,8 @@ impl<M: ModelInfo + OpenAIModelInfo> HTTPProvider<M> for OpenAIProvider {
         trace!("Raw response: {}", raw_response_text);
 
         // First try to parse as an error response
-        if let Ok(error_response) = serde_json::from_str::<OpenAIErrorResponse>(&raw_response_text) {
+        if let Ok(error_response) = serde_json::from_str::<OpenAIErrorResponse>(&raw_response_text)
+        {
             if let Some(error) = error_response.error {
                 error!("OpenAI API returned an error: {}", error.message);
                 return Err(Error::ProviderUnavailable(error.message));
@@ -205,11 +208,16 @@ impl<M: ModelInfo + OpenAIModelInfo> HTTPProvider<M> for OpenAIProvider {
                 debug!("Response model: {}", response.model);
                 if !response.choices.is_empty() {
                     debug!("Number of choices: {}", response.choices.len());
-                    debug!("First choice finish reason: {:?}", response.choices[0].finish_reason);
+                    debug!(
+                        "First choice finish reason: {:?}",
+                        response.choices[0].finish_reason
+                    );
                 }
                 if let Some(usage) = &response.usage {
-                    debug!("Token usage - prompt: {}, completion: {}, total: {}", 
-                        usage.prompt_tokens, usage.completion_tokens, usage.total_tokens);
+                    debug!(
+                        "Token usage - prompt: {}, completion: {}, total: {}",
+                        usage.prompt_tokens, usage.completion_tokens, usage.total_tokens
+                    );
                 }
                 response
             }
@@ -242,7 +250,10 @@ impl OpenAIProvider {
     /// This method converts the Chat's messages and settings into an OpenAI-specific
     /// format for the API request.
     #[instrument(skip(self, chat), level = "debug")]
-    fn create_request_payload<M: ModelInfo + OpenAIModelInfo>(&self, chat: &Chat<M>) -> Result<OpenAIRequest> {
+    fn create_request_payload<M: ModelInfo + OpenAIModelInfo>(
+        &self,
+        chat: &Chat<M>,
+    ) -> Result<OpenAIRequest> {
         info!("Creating request payload for chat with OpenAI model");
         debug!("System prompt length: {}", chat.system_prompt.len());
         debug!("Messages in history: {}", chat.history.len());
@@ -254,7 +265,7 @@ impl OpenAIProvider {
         // Convert all messages including system prompt
         debug!("Converting messages to OpenAI format");
         let mut messages: Vec<OpenAIMessage> = Vec::new();
-        
+
         // Add system prompt if present
         if !chat.system_prompt.is_empty() {
             debug!("Adding system prompt");
@@ -267,7 +278,7 @@ impl OpenAIProvider {
                 tool_call_id: None,
             });
         }
-        
+
         // Add conversation history
         for msg in &chat.history {
             debug!("Converting message with role: {}", msg.role_str());
@@ -279,8 +290,11 @@ impl OpenAIProvider {
         // Add tools if present
         let tools = if chat.has_toolbox() {
             let tool_descriptions = chat.tool_descriptions();
-            debug!("Converting {} tool descriptions to OpenAI format", tool_descriptions.len());
-            
+            debug!(
+                "Converting {} tool descriptions to OpenAI format",
+                tool_descriptions.len()
+            );
+
             if !tool_descriptions.is_empty() {
                 Some(
                     tool_descriptions
@@ -293,7 +307,7 @@ impl OpenAIProvider {
                                 parameters: desc.parameters,
                             },
                         })
-                        .collect()
+                        .collect(),
                 )
             } else {
                 None
@@ -304,8 +318,12 @@ impl OpenAIProvider {
         };
 
         // Create the tool choice setting
-        let tool_choice = if tools.is_some() { Some("auto".to_string()) } else { None };
-        
+        let tool_choice = if tools.is_some() {
+            Some("auto".to_string())
+        } else {
+            None
+        };
+
         // Create the request
         debug!("Creating OpenAIRequest");
         let request = OpenAIRequest {
@@ -492,60 +510,65 @@ impl From<&Message> for OpenAIMessage {
             Message::User { .. } => "user",
             Message::Assistant { .. } => "assistant",
             Message::Tool { .. } => "tool",
-        }.to_string();
+        }
+        .to_string();
 
         let (content, name, function_call, tool_calls, tool_call_id) = match msg {
-            Message::System { content, .. } => {
-                (Some(content.clone()), None, None, None, None)
-            },
+            Message::System { content, .. } => (Some(content.clone()), None, None, None, None),
             Message::User { content, name, .. } => {
                 let content_str = match content {
                     Content::Text(text) => Some(text.clone()),
                     Content::Parts(parts) => {
                         // For text parts, concatenate them
-                        let combined_text = parts.iter()
+                        let combined_text = parts
+                            .iter()
                             .filter_map(|part| match part {
                                 ContentPart::Text { text } => Some(text.clone()),
                                 _ => None,
                             })
                             .collect::<Vec<String>>()
                             .join("\n");
-                        
+
                         if combined_text.is_empty() {
                             None
                         } else {
                             Some(combined_text)
                         }
-                    },
+                    }
                 };
                 (content_str, name.clone(), None, None, None)
-            },
-            Message::Assistant { content, tool_calls, .. } => {
+            }
+            Message::Assistant {
+                content,
+                tool_calls,
+                ..
+            } => {
                 let content_str = match content {
                     Some(Content::Text(text)) => Some(text.clone()),
                     Some(Content::Parts(parts)) => {
                         // For text parts, concatenate them
-                        let combined_text = parts.iter()
+                        let combined_text = parts
+                            .iter()
                             .filter_map(|part| match part {
                                 ContentPart::Text { text } => Some(text.clone()),
                                 _ => None,
                             })
                             .collect::<Vec<String>>()
                             .join("\n");
-                        
+
                         if combined_text.is_empty() {
                             None
                         } else {
                             Some(combined_text)
                         }
-                    },
+                    }
                     None => None,
                 };
-                
+
                 // Convert tool calls if present
                 let openai_tool_calls = if !tool_calls.is_empty() {
                     let mut calls = Vec::with_capacity(tool_calls.len());
-                    
+
                     for tc in tool_calls {
                         calls.push(OpenAIToolCall {
                             id: tc.id.clone(),
@@ -556,17 +579,25 @@ impl From<&Message> for OpenAIMessage {
                             },
                         });
                     }
-                    
+
                     Some(calls)
                 } else {
                     None
                 };
-                
+
                 (content_str, None, None, openai_tool_calls, None)
-            },
-            Message::Tool { tool_call_id, content, .. } => {
-                (Some(content.clone()), None, None, None, Some(tool_call_id.clone()))
-            },
+            }
+            Message::Tool {
+                tool_call_id,
+                content,
+                ..
+            } => (
+                Some(content.clone()),
+                None,
+                None,
+                None,
+                Some(tool_call_id.clone()),
+            ),
         };
 
         OpenAIMessage {
@@ -594,13 +625,16 @@ impl From<&OpenAIResponse> for Message {
         // Create appropriate Message variant based on role
         let mut msg = match message.role.as_str() {
             "assistant" => {
-                let content = message.content.as_ref().map(|text| Content::Text(text.clone()));
-                
+                let content = message
+                    .content
+                    .as_ref()
+                    .map(|text| Content::Text(text.clone()));
+
                 // Handle tool calls if present
                 if let Some(openai_tool_calls) = &message.tool_calls {
                     if !openai_tool_calls.is_empty() {
                         let mut tool_calls = Vec::with_capacity(openai_tool_calls.len());
-                        
+
                         for call in openai_tool_calls {
                             let tool_call = crate::message::ToolCall {
                                 id: call.id.clone(),
@@ -612,7 +646,7 @@ impl From<&OpenAIResponse> for Message {
                             };
                             tool_calls.push(tool_call);
                         }
-                        
+
                         Message::Assistant {
                             content,
                             tool_calls,
@@ -640,7 +674,7 @@ impl From<&OpenAIResponse> for Message {
                             arguments: fc.arguments.clone(),
                         },
                     };
-                    
+
                     Message::Assistant {
                         content,
                         tool_calls: vec![tool_call],
@@ -658,7 +692,7 @@ impl From<&OpenAIResponse> for Message {
                         }
                     }
                 }
-            },
+            }
             "user" => {
                 if let Some(name) = &message.name {
                     if let Some(content) = &message.content {
@@ -671,14 +705,14 @@ impl From<&OpenAIResponse> for Message {
                 } else {
                     Message::user("")
                 }
-            },
+            }
             "system" => {
                 if let Some(content) = &message.content {
                     Message::system(content)
                 } else {
                     Message::system("")
                 }
-            },
+            }
             "tool" => {
                 if let Some(tool_call_id) = &message.tool_call_id {
                     if let Some(content) = &message.content {
@@ -694,7 +728,7 @@ impl From<&OpenAIResponse> for Message {
                         Message::user("")
                     }
                 }
-            },
+            }
             _ => {
                 // Default to user for unknown roles
                 if let Some(content) = &message.content {
@@ -728,30 +762,36 @@ impl From<&OpenAIResponse> for Message {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_message_conversion() {
         // Test simple text message
         let msg = Message::user("Hello, world!");
         let openai_msg = OpenAIMessage::from(&msg);
-        
+
         assert_eq!(openai_msg.role, "user");
         assert_eq!(openai_msg.content, Some("Hello, world!".to_string()));
-        
+
         // Test system message
         let msg = Message::system("You are a helpful assistant.");
         let openai_msg = OpenAIMessage::from(&msg);
-        
+
         assert_eq!(openai_msg.role, "system");
-        assert_eq!(openai_msg.content, Some("You are a helpful assistant.".to_string()));
-        
+        assert_eq!(
+            openai_msg.content,
+            Some("You are a helpful assistant.".to_string())
+        );
+
         // Test assistant message
         let msg = Message::assistant("I can help with that.");
         let openai_msg = OpenAIMessage::from(&msg);
-        
+
         assert_eq!(openai_msg.role, "assistant");
-        assert_eq!(openai_msg.content, Some("I can help with that.".to_string()));
-        
+        assert_eq!(
+            openai_msg.content,
+            Some("I can help with that.".to_string())
+        );
+
         // Test assistant message with tool calls
         let tool_call = crate::message::ToolCall {
             id: "tool_123".to_string(),
@@ -761,24 +801,27 @@ mod tests {
                 arguments: "{\"location\":\"San Francisco\"}".to_string(),
             },
         };
-        
+
         let msg = Message::Assistant {
             content: Some(Content::Text("I'll check the weather".to_string())),
             tool_calls: vec![tool_call],
             metadata: Default::default(),
         };
-        
+
         let openai_msg = OpenAIMessage::from(&msg);
-        
+
         assert_eq!(openai_msg.role, "assistant");
-        assert_eq!(openai_msg.content, Some("I'll check the weather".to_string()));
+        assert_eq!(
+            openai_msg.content,
+            Some("I'll check the weather".to_string())
+        );
         assert!(openai_msg.tool_calls.is_some());
         let tool_calls = openai_msg.tool_calls.unwrap();
         assert_eq!(tool_calls.len(), 1);
         assert_eq!(tool_calls[0].id, "tool_123");
         assert_eq!(tool_calls[0].function.name, "get_weather");
     }
-    
+
     #[test]
     fn test_error_response_parsing() {
         let error_json = r#"{
@@ -788,7 +831,7 @@ mod tests {
                 "code": "model_not_found"
             }
         }"#;
-        
+
         let error_response: OpenAIErrorResponse = serde_json::from_str(error_json).unwrap();
         assert!(error_response.error.is_some());
         let error = error_response.error.unwrap();
