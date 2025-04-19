@@ -276,6 +276,36 @@ impl OpenAIProvider {
 
         debug!("Converted {} messages for the request", messages.len());
 
+        // Add tools if present
+        let tools = if chat.has_toolbox() {
+            let tool_descriptions = chat.tool_descriptions();
+            debug!("Converting {} tool descriptions to OpenAI format", tool_descriptions.len());
+            
+            if !tool_descriptions.is_empty() {
+                Some(
+                    tool_descriptions
+                        .into_iter()
+                        .map(|desc| OpenAITool {
+                            r#type: "function".to_string(),
+                            function: OpenAIFunction {
+                                name: desc.name,
+                                description: desc.description,
+                                parameters: desc.parameters,
+                            },
+                        })
+                        .collect()
+                )
+            } else {
+                None
+            }
+        } else {
+            debug!("No toolbox provided");
+            None
+        };
+
+        // Create the tool choice setting
+        let tool_choice = if tools.is_some() { Some("auto".to_string()) } else { None };
+        
         // Create the request
         debug!("Creating OpenAIRequest");
         let request = OpenAIRequest {
@@ -288,6 +318,8 @@ impl OpenAIProvider {
             presence_penalty: None,
             frequency_penalty: None,
             stream: None,
+            tools,
+            tool_choice,
         };
 
         info!("Request payload created successfully");
@@ -303,18 +335,58 @@ pub(crate) struct OpenAIMessage {
     /// The content of the message
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
-    /// The function call
+    /// The function call (deprecated in favor of tool_calls)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub function_call: Option<serde_json::Value>,
+    pub function_call: Option<OpenAIFunctionCall>,
     /// The name of the function
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     /// Tool calls
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_calls: Option<Vec<serde_json::Value>>,
+    pub tool_calls: Option<Vec<OpenAIToolCall>>,
     /// Tool call ID
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+}
+
+/// Represents a tool function in the OpenAI API format
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct OpenAIFunction {
+    /// The name of the function
+    pub name: String,
+    /// The description of the function
+    pub description: String,
+    /// The parameters schema as a JSON object
+    pub parameters: serde_json::Value,
+}
+
+/// Represents a tool in the OpenAI API format
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct OpenAITool {
+    /// The type of the tool (currently always "function")
+    pub r#type: String,
+    /// The function definition
+    pub function: OpenAIFunction,
+}
+
+/// Represents a function call in the OpenAI API format
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct OpenAIFunctionCall {
+    /// The name of the function
+    pub name: String,
+    /// The arguments as a JSON string
+    pub arguments: String,
+}
+
+/// Represents a tool call in the OpenAI API format
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct OpenAIToolCall {
+    /// The ID of the tool call
+    pub id: String,
+    /// The type of the tool (currently always "function")
+    pub r#type: String,
+    /// The function call
+    pub function: OpenAIFunctionCall,
 }
 
 /// Represents a request to the OpenAI API
@@ -345,6 +417,12 @@ pub(crate) struct OpenAIRequest {
     /// Stream mode
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
+    /// Tools available to the model
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<OpenAITool>>,
+    /// Tool choice strategy (auto, none, or a specific tool)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<String>,
 }
 
 /// Represents a response from the OpenAI API
@@ -439,12 +517,46 @@ impl From<&Message> for OpenAIMessage {
             None => None,
         };
 
+        // Convert function call if present
+        let function_call = if let Some(fc) = &msg.function_call {
+            Some(OpenAIFunctionCall {
+                name: fc.name.clone(),
+                arguments: fc.arguments.clone(),
+            })
+        } else {
+            None
+        };
+
+        // Convert tool calls if present
+        let tool_calls = if let Some(tcs) = &msg.tool_calls {
+            if !tcs.is_empty() {
+                let mut calls = Vec::with_capacity(tcs.len());
+                
+                for tc in tcs {
+                    calls.push(OpenAIToolCall {
+                        id: tc.id.clone(),
+                        r#type: tc.tool_type.clone(),
+                        function: OpenAIFunctionCall {
+                            name: tc.function.name.clone(),
+                            arguments: tc.function.arguments.clone(),
+                        },
+                    });
+                }
+                
+                Some(calls)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         OpenAIMessage {
             role,
             content,
-            function_call: None, // Not implemented yet
+            function_call,
             name: msg.name.clone(),
-            tool_calls: None, // Not implemented yet
+            tool_calls,
             tool_call_id: msg.tool_call_id.clone(),
         }
     }
@@ -472,12 +584,48 @@ impl From<&OpenAIResponse> for Message {
 
         let content = message.content.as_ref().map(|text| Content::Text(text.clone()));
 
+        // Convert tool calls if present
+        let tool_calls = if let Some(openai_tool_calls) = &message.tool_calls {
+            if !openai_tool_calls.is_empty() {
+                let mut tool_calls = Vec::with_capacity(openai_tool_calls.len());
+                
+                for call in openai_tool_calls {
+                    let tool_call = crate::message::ToolCall {
+                        id: call.id.clone(),
+                        tool_type: call.r#type.clone(),
+                        function: crate::message::FunctionCall {
+                            name: call.function.name.clone(),
+                            arguments: call.function.arguments.clone(),
+                        },
+                    };
+                    tool_calls.push(tool_call);
+                }
+                
+                Some(tool_calls)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Convert function call if present and no tool calls (older OpenAI API)
+        let function_call = if tool_calls.is_none() && message.function_call.is_some() {
+            let fc = message.function_call.as_ref().unwrap();
+            Some(crate::message::FunctionCall {
+                name: fc.name.clone(),
+                arguments: fc.arguments.clone(),
+            })
+        } else {
+            None
+        };
+
         let mut msg = Message {
             role,
             content,
             name: message.name.clone(),
-            function_call: None, // Not mapping this yet
-            tool_calls: None, // Not mapping this yet
+            function_call,
+            tool_calls,
             tool_call_id: message.tool_call_id.clone(),
             metadata: Default::default(),
         };

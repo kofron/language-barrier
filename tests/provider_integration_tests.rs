@@ -329,7 +329,10 @@ async fn test_anthropic_tool_result_conversion() {
     
     // Verify the request contains tool_result with the right content
     assert!(body_str.contains("\"tool_result\""));
-    assert!(body_str.contains("\"tool_call_id\":\"call_123\""));
+    
+    // Anthropic API uses tool_use_id instead of tool_call_id
+    assert!(body_str.contains("\"tool_use_id\":\"call_123\""));
+    
     assert!(body_str.contains("Weather in San Francisco: Sunny, 72°F"));
 }
 

@@ -11,7 +11,7 @@ use crate::token::TokenCounter;
 ///
 /// ```
 /// use language_barrier::{ChatHistoryCompactor, TokenCounter, DropOldestCompactor};
-/// use language_barrier::message::Message;
+/// use language_barrier::message::{Message, Content};
 ///
 /// let mut compactor = DropOldestCompactor::default();
 /// let mut history = vec![
@@ -24,7 +24,7 @@ use crate::token::TokenCounter;
 /// // Add token counts for all messages
 /// for msg in &history {
 ///     if let Some(content) = &msg.content {
-///         if let crate::message::Content::Text(text) = content {
+///         if let Content::Text(text) = content {
 ///             counter.observe(text);
 ///         }
 ///     }

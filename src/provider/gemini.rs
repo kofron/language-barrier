@@ -318,12 +318,40 @@ impl GeminiProvider {
             stop_sequences: None,
         });
 
+        // Add tools if present
+        let tools = if chat.has_toolbox() {
+            let tool_descriptions = chat.tool_descriptions();
+            debug!("Converting {} tool descriptions to Gemini format", tool_descriptions.len());
+            
+            if !tool_descriptions.is_empty() {
+                // Gemini uses a slightly different format with functionDeclarations
+                let function_declarations = tool_descriptions
+                    .into_iter()
+                    .map(|desc| GeminiFunctionDeclaration {
+                        name: desc.name,
+                        description: desc.description,
+                        parameters: desc.parameters,
+                    })
+                    .collect();
+                
+                Some(vec![GeminiTool {
+                    function_declarations,
+                }])
+            } else {
+                None
+            }
+        } else {
+            debug!("No toolbox provided");
+            None
+        };
+
         // Create the request
         debug!("Creating GeminiRequest");
         let request = GeminiRequest {
             contents,
             system_instruction,
             generation_config,
+            tools,
         };
 
         info!("Request payload created successfully");
@@ -341,6 +369,19 @@ pub(crate) struct GeminiPart {
     /// The inline data (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub inline_data: Option<GeminiInlineData>,
+    
+    /// The function call (optional)
+    #[serde(skip_serializing_if = "Option::is_none", rename = "functionCall")]
+    pub function_call: Option<GeminiFunctionCall>,
+}
+
+/// Represents a function call in the Gemini API format
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct GeminiFunctionCall {
+    /// The name of the function
+    pub name: String,
+    /// The arguments as a JSON Value
+    pub args: serde_json::Value,
 }
 
 impl GeminiPart {
@@ -349,6 +390,7 @@ impl GeminiPart {
         GeminiPart {
             text: Some(text),
             inline_data: None,
+            function_call: None,
         }
     }
 
@@ -357,6 +399,7 @@ impl GeminiPart {
         GeminiPart {
             text: None,
             inline_data: Some(GeminiInlineData { data, mime_type }),
+            function_call: None,
         }
     }
 }
@@ -400,6 +443,36 @@ pub(crate) struct GeminiGenerationConfig {
     pub stop_sequences: Option<Vec<String>>,
 }
 
+/// Represents a function declaration in the Gemini API format
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct GeminiFunctionDeclaration {
+    /// The name of the function
+    pub name: String,
+    /// The description of the function
+    pub description: String,
+    /// The parameters schema
+    pub parameters: serde_json::Value,
+}
+
+/// Represents a function in the Gemini API format (tools are called functions in Gemini)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct GeminiFunction {
+    /// The name of the function
+    pub name: String,
+    /// The description of the function
+    pub description: String,
+    /// The parameters definition
+    pub parameters: serde_json::Value,
+}
+
+/// Represents a tool in the Gemini API format
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct GeminiTool {
+    /// The function declaration
+    #[serde(rename = "functionDeclarations")]
+    pub function_declarations: Vec<GeminiFunctionDeclaration>,
+}
+
 /// Represents a request to the Gemini API
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct GeminiRequest {
@@ -411,6 +484,9 @@ pub(crate) struct GeminiRequest {
     /// The generation config (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub generation_config: Option<GeminiGenerationConfig>,
+    /// The tools (functions) available to the model
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<GeminiTool>>,
 }
 
 /// Represents a response from the Gemini API
@@ -507,36 +583,58 @@ impl From<&GeminiResponse> for Message {
         // Get the first candidate
         let candidate = &response.candidates[0];
 
-        // Convert the parts to content parts
-        let content_parts: Vec<ContentPart> = candidate
-            .content
-            .parts
-            .iter()
-            .map(|part| {
-                if let Some(text) = &part.text {
-                    ContentPart::text(text.clone())
-                } else if let Some(inline_data) = &part.inline_data {
-                    // Just convert to text representation for now
-                    ContentPart::text(format!(
-                        "[Image: {} ({})]",
-                        inline_data.data, inline_data.mime_type
-                    ))
-                } else {
-                    // Empty part as fallback
-                    ContentPart::text("")
-                }
-            })
-            .collect();
+        // Extract text content and tool calls separately
+        let mut text_content_parts = Vec::new();
+        let mut tool_calls = Vec::new();
+        let mut tool_call_id_counter = 0;
 
-        let content = if content_parts.len() == 1 {
-            // If there's only one text part, use simple Text content
-            match &content_parts[0] {
-                ContentPart::Text { text } => Some(Content::Text(text.clone())),
-                _ => Some(Content::Parts(content_parts)),
+        // Process each part of the response
+        for part in &candidate.content.parts {
+            // Handle function calls
+            if let Some(function_call) = &part.function_call {
+                tool_call_id_counter += 1;
+                let tool_id = format!("gemini_call_{}", tool_call_id_counter);
+
+                let args_str = serde_json::to_string(&function_call.args)
+                    .unwrap_or_else(|_| "{}".to_string());
+
+                let tool_call = crate::message::ToolCall {
+                    id: tool_id,
+                    tool_type: "function".to_string(),
+                    function: crate::message::FunctionCall {
+                        name: function_call.name.clone(),
+                        arguments: args_str,
+                    },
+                };
+
+                tool_calls.push(tool_call);
             }
-        } else {
+
+            // Handle text content
+            if let Some(text) = &part.text {
+                text_content_parts.push(ContentPart::text(text.clone()));
+            } else if let Some(inline_data) = &part.inline_data {
+                // Just convert to text representation for now
+                text_content_parts.push(ContentPart::text(format!(
+                    "[Image: {} ({})]",
+                    inline_data.data, inline_data.mime_type
+                )));
+            }
+        }
+
+        // Create the content
+        let content = if text_content_parts.len() == 1 {
+            // If there's only one text part, use simple Text content
+            match &text_content_parts[0] {
+                ContentPart::Text { text } => Some(Content::Text(text.clone())),
+                _ => Some(Content::Parts(text_content_parts)),
+            }
+        } else if !text_content_parts.is_empty() {
             // Multiple content parts
-            Some(Content::Parts(content_parts))
+            Some(Content::Parts(text_content_parts))
+        } else {
+            // No text content, may have only function calls
+            None
         };
 
         let mut msg = Message {
@@ -544,7 +642,7 @@ impl From<&GeminiResponse> for Message {
             content,
             name: None,
             function_call: None,
-            tool_calls: None,
+            tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
             tool_call_id: None,
             metadata: Default::default(),
         };

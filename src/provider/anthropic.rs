@@ -188,6 +188,29 @@ impl HTTPProvider<Claude> for AnthropicProvider {
         info!("Parsing response from Anthropic API");
         trace!("Raw response: {}", raw_response_text);
 
+        // First check if it's an error response
+        if raw_response_text.contains("\"error\"") {
+            let error_response: serde_json::Value = match serde_json::from_str(&raw_response_text) {
+                Ok(err) => err,
+                Err(e) => {
+                    error!("Failed to parse error response: {}", e);
+                    error!("Raw response: {}", raw_response_text);
+                    return Err(Error::Serialization(e));
+                }
+            };
+            
+            if let Some(error) = error_response.get("error") {
+                if let Some(message) = error.get("message") {
+                    let error_message = message.as_str().unwrap_or("Unknown error");
+                    error!("Anthropic API returned an error: {}", error_message);
+                    return Err(Error::ProviderUnavailable(error_message.to_string()));
+                }
+            }
+            
+            error!("Unknown error format in response: {}", raw_response_text);
+            return Err(Error::ProviderUnavailable("Unknown error from Anthropic API".to_string()));
+        }
+
         debug!("Deserializing response JSON");
         let anthropic_response = match serde_json::from_str::<AnthropicResponse>(&raw_response_text)
         {
@@ -386,7 +409,8 @@ pub(crate) struct AnthropicToolResponse {
     /// The type of the tool response
     #[serde(rename = "type")]
     pub type_field: String,
-    /// The ID of the tool call
+    /// The ID of the tool call (Anthropic API uses tool_use_id, but we use tool_call_id internally)
+    #[serde(rename = "tool_use_id")]
     pub tool_call_id: String,
     /// The content of the tool response
     pub content: String,
@@ -511,6 +535,7 @@ impl From<&Message> for AnthropicMessage {
         if msg.role == MessageRole::Tool && msg.tool_call_id.is_some() {
             if let Some(Content::Text(text)) = &msg.content {
                 // We need to keep the first part if it exists, but replace any existing content with a tool_result
+                // Note: Anthropic API uses tool_use_id, but our internal API uses tool_call_id
                 content = vec![AnthropicContentPart::ToolResult(AnthropicToolResponse {
                     type_field: "tool_result".to_string(),
                     tool_call_id: msg.tool_call_id.as_ref().unwrap().clone(),
