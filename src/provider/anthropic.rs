@@ -666,7 +666,7 @@ impl From<&AnthropicResponse> for Message {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::message::ImageUrl;
+    
     use crate::message::{Content, ContentPart, Message};
 
     #[test]

@@ -255,19 +255,17 @@ impl GeminiProvider {
             let msg_role_str = msg.role_str();
             
             // If role changes, finish the current content and start a new one
-            if current_role_str.is_some() && current_role_str != Some(msg_role_str) {
-                if !current_parts.is_empty() {
-                    let role = match current_role_str {
-                        Some("user") => Some("user".to_string()),
-                        Some("assistant") => Some("model".to_string()),
-                        _ => None,
-                    };
+            if current_role_str.is_some() && current_role_str != Some(msg_role_str) && !current_parts.is_empty() {
+                let role = match current_role_str {
+                    Some("user") => Some("user".to_string()),
+                    Some("assistant") => Some("model".to_string()),
+                    _ => None,
+                };
 
-                    contents.push(GeminiContent {
-                        parts: std::mem::take(&mut current_parts),
-                        role,
-                    });
-                }
+                contents.push(GeminiContent {
+                    parts: std::mem::take(&mut current_parts),
+                    role,
+                });
             }
 
             current_role_str = Some(msg_role_str);

@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use language_barrier::{
     Chat, Message, Mistral, Secret, SingleRequestExecutor, Tool, ToolDescription, Toolbox,
 };
-use language_barrier::message::{Content, ContentPart, Function, ToolCall};
+use language_barrier::message::Content;
 use language_barrier::provider::mistral::{MistralConfig, MistralProvider};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -170,11 +170,11 @@ async fn test_mistral_tools() {
                     },
                     _ => {
                         println!("Unexpected content format");
-                        assert!(false, "Expected text content");
+                        panic!("Expected text content");
                     }
                 }
             },
-            _ => assert!(false, "Expected assistant message"),
+            _ => panic!("Expected assistant message"),
         }
     } else {
         // Some models might get the calculation right without using tools
@@ -195,11 +195,11 @@ async fn test_mistral_tools() {
                     },
                     _ => {
                         println!("Unexpected content format");
-                        assert!(false, "Expected text content");
+                        panic!("Expected text content");
                     }
                 }
             },
-            _ => assert!(false, "Expected assistant message"),
+            _ => panic!("Expected assistant message"),
         }
     }
 }

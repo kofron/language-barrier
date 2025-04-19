@@ -4,7 +4,6 @@ use language_barrier::model::Mistral;
 use language_barrier::provider::HTTPProvider;
 use language_barrier::provider::mistral::{MistralConfig, MistralProvider};
 use language_barrier::{Chat, Message, Tool, ToolDescription, Toolbox};
-use language_barrier::message::{Content, ContentPart, ToolCall, Function};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

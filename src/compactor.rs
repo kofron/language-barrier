@@ -83,12 +83,12 @@ impl ChatHistoryCompactor for DropOldestCompactor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::message::Content;
+    
     use crate::message::Message;
 
     #[test]
     fn test_drop_oldest_compactor() {
-        let mut compactor = DropOldestCompactor::default();
+        let compactor = DropOldestCompactor::default();
         let mut history = vec![
             Message::system("System message"),
             Message::user("First user message"),

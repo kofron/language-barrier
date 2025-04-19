@@ -3,7 +3,7 @@ use language_barrier::SingleRequestExecutor;
 use language_barrier::model::Gemini;
 use language_barrier::provider::gemini::{GeminiConfig, GeminiProvider};
 use language_barrier::{Chat, Message, Result, Tool, ToolDescription, Toolbox};
-use language_barrier::message::{Content, ContentPart, ToolCall, Function};
+use language_barrier::message::{Content, ContentPart};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -105,11 +105,8 @@ async fn test_gemini_tools() {
     // Get response
     let response = match executor.send(chat).await {
         Ok(resp) => {
-            match &resp {
-                Message::Assistant { content, .. } => {
-                    info!("Received response: {:?}", content);
-                },
-                _ => {},
+            if let Message::Assistant { content, .. } = &resp {
+                info!("Received response: {:?}", content);
             }
             resp
         }

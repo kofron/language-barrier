@@ -3,7 +3,7 @@ use language_barrier::SingleRequestExecutor;
 use language_barrier::model::{Claude, Sonnet35Version};
 use language_barrier::provider::anthropic::{AnthropicConfig, AnthropicProvider};
 use language_barrier::{Chat, Message, Tool, ToolDescription, Toolbox, Result};
-use language_barrier::message::{Content, ContentPart, ToolCall, Function};
+use language_barrier::message::{Content, ContentPart};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -117,11 +117,8 @@ async fn test_multi_turn_conversation_with_tools() {
     // Get first response
     let response = match executor.send(chat).await {
         Ok(resp) => {
-            match &resp {
-                Message::Assistant { content, .. } => {
-                    info!("Received first response: {:?}", content);
-                },
-                _ => {},
+            if let Message::Assistant { content, .. } = &resp {
+                info!("Received first response: {:?}", content);
             }
             resp
         },
@@ -166,11 +163,8 @@ async fn test_multi_turn_conversation_with_tools() {
     // Get response to follow-up
     let follow_up_response = match executor.send(updated_chat).await {
         Ok(resp) => {
-            match &resp {
-                Message::Assistant { content, .. } => {
-                    info!("Received follow-up response: {:?}", content);
-                },
-                _ => {},
+            if let Message::Assistant { content, .. } = &resp {
+                info!("Received follow-up response: {:?}", content);
             }
             resp
         },
@@ -234,12 +228,7 @@ async fn test_multi_turn_conversation_with_tools() {
     // Check that the model remembered previous context - it shouldn't repeat the San Francisco weather
     // when we asked about New York
     let response_text = match &follow_up_response {
-        Message::Assistant { content, .. } => {
-            match content {
-                Some(Content::Text(text)) => text.clone(),
-                _ => String::new(),
-            }
-        },
+        Message::Assistant { content: Some(Content::Text(text)), .. } => text.clone(),
         _ => String::new(),
     };
     

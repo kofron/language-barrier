@@ -3,7 +3,7 @@ use language_barrier::SingleRequestExecutor;
 use language_barrier::model::GPT;
 use language_barrier::provider::openai::{OpenAIConfig, OpenAIProvider};
 use language_barrier::{Chat, Message, Tool, ToolDescription, Toolbox, Result};
-use language_barrier::message::{Content, ContentPart, ToolCall, Function};
+use language_barrier::message::{Content, ContentPart};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -110,11 +110,8 @@ async fn test_openai_tools() {
     // Get response
     let response = match executor.send(chat).await {
         Ok(resp) => {
-            match &resp {
-                Message::Assistant { content, .. } => {
-                    info!("Received response: {:?}", content);
-                },
-                _ => {},
+            if let Message::Assistant { content, .. } = &resp {
+                info!("Received response: {:?}", content);
             }
             resp
         },
@@ -168,11 +165,8 @@ async fn test_openai_tools() {
         // Get follow-up response
         let follow_up = match executor.send(updated_chat).await {
             Ok(resp) => {
-                match &resp {
-                    Message::Assistant { content, .. } => {
-                        info!("Received follow-up response: {:?}", content);
-                    },
-                    _ => {},
+                if let Message::Assistant { content, .. } = &resp {
+                    info!("Received follow-up response: {:?}", content);
                 }
                 // Note: OpenAI often returns only tool calls without content
                 resp
