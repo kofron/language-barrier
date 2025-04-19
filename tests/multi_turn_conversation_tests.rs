@@ -3,10 +3,6 @@ use language_barrier::model::{Claude, Gemini, GPT, Mistral, Sonnet35Version, Mod
 use language_barrier::provider::HTTPProvider;
 use language_barrier::{Chat, Message};
 use language_barrier::message::{Content, ContentPart, ToolCall, Function};
-use language_barrier::provider::anthropic::AnthropicProvider;
-use language_barrier::provider::openai::OpenAIProvider;
-use language_barrier::provider::gemini::GeminiProvider;
-use language_barrier::provider::mistral::MistralProvider;
 use tracing::{info, warn, Level};
 
 // Import our helper modules

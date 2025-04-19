@@ -27,7 +27,7 @@ async fn test_weather_tool_request_creation() {
     // Test Anthropic weather tool request creation
     {
         info!("Testing Anthropic weather tool request creation");
-        let provider = get_anthropic_provider().unwrap_or_else(language_barrier::provider::anthropic::AnthropicProvider::new);
+        let provider = get_anthropic_provider().unwrap_or_default();
         let model = Claude::Sonnet35 { version: Sonnet35Version::V2 };
         let mut chat = Chat::new(model)
             .with_system_prompt("You are a helpful AI assistant.")
@@ -51,7 +51,7 @@ async fn test_weather_tool_request_creation() {
     // Test OpenAI weather tool request creation
     {
         info!("Testing OpenAI weather tool request creation");
-        let provider = get_openai_provider().unwrap_or_else(language_barrier::provider::openai::OpenAIProvider::new);
+        let provider = get_openai_provider().unwrap_or_default();
         let model = GPT::GPT4o;
         let mut chat = Chat::new(model)
             .with_system_prompt("You are a helpful AI assistant.")
@@ -75,7 +75,7 @@ async fn test_weather_tool_request_creation() {
     // Test Gemini weather tool request creation
     {
         info!("Testing Gemini weather tool request creation");
-        let provider = get_gemini_provider().unwrap_or_else(language_barrier::provider::gemini::GeminiProvider::new);
+        let provider = get_gemini_provider().unwrap_or_default();
         let model = Gemini::Flash20;
         let mut chat = Chat::new(model)
             .with_system_prompt("You are a helpful AI assistant.")
@@ -97,7 +97,7 @@ async fn test_weather_tool_request_creation() {
     // Test Mistral weather tool request creation
     {
         info!("Testing Mistral weather tool request creation");
-        let provider = get_mistral_provider().unwrap_or_else(language_barrier::provider::mistral::MistralProvider::new);
+        let provider = get_mistral_provider().unwrap_or_default();
         let model = Mistral::Small;
         let mut chat = Chat::new(model)
             .with_system_prompt("You are a helpful AI assistant.")

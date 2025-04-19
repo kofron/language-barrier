@@ -23,7 +23,7 @@ async fn test_anthropic_request_creation() {
     info!("Starting test_anthropic_request_creation");
     
     // Create an Anthropic provider with default configuration
-    let provider = get_anthropic_provider().unwrap_or_else(language_barrier::provider::anthropic::AnthropicProvider::new);
+    let provider = get_anthropic_provider().unwrap_or_default();
 
     // Create a chat with a simple message
     let model = Claude::Sonnet35 {
@@ -137,7 +137,7 @@ async fn test_anthropic_tool_response_parsing() {
     info!("Starting test_anthropic_tool_response_parsing");
     
     // Create an Anthropic provider with default configuration
-    let provider = get_anthropic_provider().unwrap_or_else(language_barrier::provider::anthropic::AnthropicProvider::new);
+    let provider = get_anthropic_provider().unwrap_or_default();
 
     // Create a mock Anthropic response JSON with a tool call
     let response_json = r#"{
@@ -219,7 +219,7 @@ async fn test_anthropic_tool_result_conversion() {
     info!("Starting test_anthropic_tool_result_conversion");
     
     // Create a provider to use
-    let provider = get_anthropic_provider().unwrap_or_else(language_barrier::provider::anthropic::AnthropicProvider::new);
+    let provider = get_anthropic_provider().unwrap_or_default();
     
     // Create a sequence with a tool message
     let mut chat = Chat::new(Claude::Haiku3)
@@ -265,7 +265,7 @@ async fn test_anthropic_tools_request_creation() {
     info!("Starting test_anthropic_tools_request_creation");
     
     // Create an Anthropic provider with default configuration
-    let provider = get_anthropic_provider().unwrap_or_else(language_barrier::provider::anthropic::AnthropicProvider::new);
+    let provider = get_anthropic_provider().unwrap_or_default();
 
     // Create a chat with a simple message and tools
     let model = Claude::Sonnet35 {
@@ -360,7 +360,7 @@ async fn test_gemini_request_creation() {
     info!("Starting test_gemini_request_creation");
     
     // Create a Gemini provider with default configuration
-    let provider = get_gemini_provider().unwrap_or_else(language_barrier::provider::gemini::GeminiProvider::new);
+    let provider = get_gemini_provider().unwrap_or_default();
 
     // Create a chat with a simple message
     let model = Gemini::Flash20;
@@ -464,7 +464,7 @@ async fn test_openai_request_creation() {
     info!("Starting test_openai_request_creation");
     
     // Create an OpenAI provider with default configuration
-    let provider = get_openai_provider().unwrap_or_else(language_barrier::provider::openai::OpenAIProvider::new);
+    let provider = get_openai_provider().unwrap_or_default();
 
     // Create a chat with a simple message
     let model = GPT::GPT4o;
