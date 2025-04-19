@@ -3,9 +3,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use language_barrier::{
-    Chat, Claude, Message, Result, Tool, ToolCall, ToolCallView, ToolDescription, Toolbox,
+    Chat, Claude, Message, Result, Tool, ToolCallView, ToolDescription, Toolbox,
     TypedToolbox,
 };
+use language_barrier::message::{Content, ToolCall, Function};
 
 // Define a typed weather tool request
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -141,20 +142,19 @@ fn main() -> Result<()> {
 
     // In a real scenario, the assistant would generate this message with tool calls
     // Here we manually create it for demonstration purposes
-    let mut assistant_message = Message::assistant("I'll check the weather for you.");
 
     // Create a tool call
     let tool_call = ToolCall {
         id: "call_abc123".to_string(),
         tool_type: "function".to_string(),
-        function: language_barrier::message::FunctionCall {
+        function: Function {
             name: "get_weather".to_string(),
             arguments: r#"{"location":"San Francisco","units":"fahrenheit"}"#.to_string(),
         },
     };
 
-    // Add the tool call to the assistant message
-    assistant_message.tool_calls = Some(vec![tool_call]);
+    // Create new assistant message with the tool call
+    let assistant_message = Message::assistant_with_tool_calls(vec![tool_call]);
 
     // Add the message to chat history
     chat.add_message(assistant_message.clone());
@@ -196,11 +196,24 @@ fn main() -> Result<()> {
     // Print the full conversation
     println!("\nFull conversation:");
     for msg in chat.history.iter() {
-        match msg.role {
-            language_barrier::MessageRole::User => println!("User: {:?}", msg.content),
-            language_barrier::MessageRole::Assistant => {
-                println!("Assistant: {:?}", msg.content);
-                if let Some(tool_calls) = &msg.tool_calls {
+        match msg {
+            Message::User { content, .. } => {
+                if let Content::Text(text) = content {
+                    println!("User: {}", text);
+                } else {
+                    println!("User: {:?}", content);
+                }
+            },
+            Message::Assistant { content, tool_calls, .. } => {
+                if let Some(Content::Text(text)) = content {
+                    println!("Assistant: {}", text);
+                } else if let Some(content) = content {
+                    println!("Assistant: {:?}", content);
+                } else {
+                    println!("Assistant: [no content]");
+                }
+                
+                if !tool_calls.is_empty() {
                     for call in tool_calls {
                         println!(
                             "  Tool Call: {} ({}) - {}",
@@ -208,15 +221,13 @@ fn main() -> Result<()> {
                         );
                     }
                 }
-            }
-            language_barrier::MessageRole::Tool => {
-                println!(
-                    "Tool ({}): {:?}",
-                    msg.tool_call_id.as_ref().unwrap(),
-                    msg.content
-                );
-            }
-            _ => println!("{:?}: {:?}", msg.role, msg.content),
+            },
+            Message::Tool { tool_call_id, content, .. } => {
+                println!("Tool ({}): {}", tool_call_id, content);
+            },
+            Message::System { content, .. } => {
+                println!("System: {}", content);
+            },
         }
     }
 

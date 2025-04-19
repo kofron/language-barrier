@@ -297,7 +297,7 @@ pub trait TypedToolbox<T: DeserializeOwned>: Toolbox {
 /// # Examples
 ///
 /// ```
-/// use language_barrier::{Message, MessageRole, ToolCall, ToolCallView, TypedToolbox};
+/// use language_barrier::{Message, ToolCall, ToolCallView, TypedToolbox};
 /// use serde::{Deserialize, Serialize};
 ///
 /// // Assuming MyToolbox and MyToolRequest are defined as in previous examples

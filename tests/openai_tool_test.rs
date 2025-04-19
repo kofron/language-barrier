@@ -3,6 +3,7 @@ use language_barrier::SingleRequestExecutor;
 use language_barrier::model::GPT;
 use language_barrier::provider::openai::{OpenAIConfig, OpenAIProvider};
 use language_barrier::{Chat, Message, Tool, ToolDescription, Toolbox, Result};
+use language_barrier::message::{Content, ContentPart, ToolCall, Function};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -109,7 +110,12 @@ async fn test_openai_tools() {
     // Get response
     let response = match executor.send(chat).await {
         Ok(resp) => {
-            info!("Received response: {:?}", resp.content);
+            match &resp {
+                Message::Assistant { content, .. } => {
+                    info!("Received response: {:?}", content);
+                },
+                _ => {},
+            }
             resp
         },
         Err(e) => {
@@ -119,19 +125,26 @@ async fn test_openai_tools() {
     };
     
     // Check if the response includes a tool call
-    if let Some(tool_calls) = &response.tool_calls {
-        info!("Response contains {} tool calls", tool_calls.len());
-        for tool_call in tool_calls {
-            info!("Tool call: {} - {}", tool_call.function.name, tool_call.function.arguments);
-        }
-        assert!(tool_calls.len() > 0, "Expected at least one tool call");
-    } else {
-        info!("Response does not contain tool calls");
-        // Tool calls aren't guaranteed, so this isn't a failure
-    }
+    let has_tool_calls = match &response {
+        Message::Assistant { tool_calls, .. } => {
+            if !tool_calls.is_empty() {
+                info!("Response contains {} tool calls", tool_calls.len());
+                for tool_call in tool_calls {
+                    info!("Tool call: {} - {}", tool_call.function.name, tool_call.function.arguments);
+                }
+                assert!(!tool_calls.is_empty(), "Expected at least one tool call");
+                true
+            } else {
+                info!("Response does not contain tool calls");
+                // Tool calls aren't guaranteed, so this isn't a failure
+                false
+            }
+        },
+        _ => false,
+    };
     
     // Create a new chat with the tool response
-    if response.tool_calls.is_some() {
+    if has_tool_calls {
         let mut updated_chat = Chat::new(GPT::GPT4o)
             .with_system_prompt("You are a helpful AI assistant that can provide weather information.")
             .with_max_output_tokens(1000)
@@ -155,7 +168,12 @@ async fn test_openai_tools() {
         // Get follow-up response
         let follow_up = match executor.send(updated_chat).await {
             Ok(resp) => {
-                info!("Received follow-up response: {:?}", resp.content);
+                match &resp {
+                    Message::Assistant { content, .. } => {
+                        info!("Received follow-up response: {:?}", content);
+                    },
+                    _ => {},
+                }
                 // Note: OpenAI often returns only tool calls without content
                 resp
             },
@@ -166,44 +184,53 @@ async fn test_openai_tools() {
         };
         
         // Check for London reference in either content or tool calls
-        let references_london_in_content = if let Some(content) = &follow_up.content {
-            match content {
-                language_barrier::message::Content::Text(text) => {
-                    info!("Follow-up text: {}", text);
-                    text.contains("London")
-                },
-                language_barrier::message::Content::Parts(parts) => {
-                    let has_london = parts.iter().any(|part| {
-                        match part {
-                            language_barrier::message::ContentPart::Text { text } => {
-                                info!("Follow-up part: {}", text);
-                                text.contains("London")
-                            },
-                            _ => false,
-                        }
-                    });
-                    has_london
+        let references_london_in_content = match &follow_up {
+            Message::Assistant { content, .. } => {
+                match content {
+                    Some(Content::Text(text)) => {
+                        info!("Follow-up text: {}", text);
+                        text.contains("London")
+                    },
+                    Some(Content::Parts(parts)) => {
+                        let has_london = parts.iter().any(|part| {
+                            match part {
+                                ContentPart::Text { text } => {
+                                    info!("Follow-up part: {}", text);
+                                    text.contains("London")
+                                },
+                                _ => false,
+                            }
+                        });
+                        has_london
+                    },
+                    None => {
+                        info!("Follow-up has no content, will check tool calls only");
+                        false
+                    }
                 }
-            }
-        } else {
-            info!("Follow-up has no content, will check tool calls only");
-            false
+            },
+            _ => false,
         };
         
         // Check if the follow-up uses tools with London reference
-        let references_london_in_tools = if let Some(tool_calls) = &follow_up.tool_calls {
-            info!("Follow-up contains {} tool calls", tool_calls.len());
-            let mut has_london_tool = false;
-            
-            for tool_call in tool_calls {
-                info!("Follow-up tool call: {} - {}", tool_call.function.name, tool_call.function.arguments);
-                if tool_call.function.arguments.contains("London") {
-                    has_london_tool = true;
+        let references_london_in_tools = match &follow_up {
+            Message::Assistant { tool_calls, .. } => {
+                if !tool_calls.is_empty() {
+                    info!("Follow-up contains {} tool calls", tool_calls.len());
+                    let mut has_london_tool = false;
+                    
+                    for tool_call in tool_calls {
+                        info!("Follow-up tool call: {} - {}", tool_call.function.name, tool_call.function.arguments);
+                        if tool_call.function.arguments.contains("London") {
+                            has_london_tool = true;
+                        }
+                    }
+                    has_london_tool
+                } else {
+                    false
                 }
-            }
-            has_london_tool
-        } else {
-            false
+            },
+            _ => false,
         };
         
         // OpenAI may return just tool calls without content, so we check both possibilities

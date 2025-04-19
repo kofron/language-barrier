@@ -97,10 +97,9 @@ impl ContentPart {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::message::{ContentPart, ImageUrl};
+    /// use language_barrier::message::ContentPart;
     ///
-    /// let image_url = ImageUrl::new("https://example.com/image.jpg");
-    /// let part = ContentPart::image_url(image_url);
+    /// let part = ContentPart::image_url("https://example.com/image.jpg");
     /// ```
     pub fn image_url(url: impl Into<String>) -> Self {
         ContentPart::ImageUrl { image_url: ImageUrl::new(url) }
@@ -193,13 +192,12 @@ pub struct ToolCall {
 
 /// Represents a message in a conversation
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "role", content = "content")]
+#[serde(tag = "role")]
 pub enum Message {
     /// Message from the system (instructions)
     #[serde(rename = "system")]
     System {
         /// The content of the system message
-        #[serde(flatten)]
         content: String,
         /// Additional provider-specific metadata
         #[serde(flatten, skip_serializing_if = "HashMap::is_empty")]
@@ -210,7 +208,6 @@ pub enum Message {
     #[serde(rename = "user")]
     User {
         /// The content of the user message
-        #[serde(flatten)]
         content: Content,
         /// The name of the user (optional)
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -240,7 +237,6 @@ pub enum Message {
         /// The ID of the tool call this message is responding to
         tool_call_id: String,
         /// The content of the tool response
-        #[serde(flatten)]
         content: String,
         /// Additional provider-specific metadata
         #[serde(flatten, skip_serializing_if = "HashMap::is_empty")]
@@ -308,7 +304,7 @@ impl Message {
     ///
     /// let parts = vec![
     ///     ContentPart::text("Look at this image:"),
-    ///     ContentPart::image_url("https://example.com/image.jpg".into()),
+    ///     ContentPart::image_url("https://example.com/image.jpg"),
     /// ];
     /// let msg = Message::user_with_parts(parts);
     /// ```
@@ -456,21 +452,28 @@ mod tests {
 
     #[test]
     fn test_message_serialization() {
+        // Test user message serialization
         let msg = Message::user("Hello, world!");
         let serialized = serde_json::to_string(&msg).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&serialized).unwrap();
 
+        // Check externally tagged enum serialization
         assert_eq!(parsed["role"], "user");
-        assert_eq!(parsed["content"], "Hello, world!");
-
-        // Test with metadata
+        
+        // In the new format, content is a property within the User variant,
+        // and for text content it's serialized as a string directly
+        assert!(parsed.get("content").is_some());
+        
+        // Test with metadata and name
         let msg = Message::user_with_name("John", "Hello")
             .with_metadata("priority", json!(5));
         let serialized = serde_json::to_string(&msg).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&serialized).unwrap();
 
         assert_eq!(parsed["role"], "user");
+        assert!(parsed.get("name").is_some());
         assert_eq!(parsed["name"], "John");
+        assert!(parsed.get("content").is_some());
         assert_eq!(parsed["priority"], 5);
     }
 

@@ -6,6 +6,7 @@ use language_barrier::provider::anthropic::{AnthropicConfig, AnthropicProvider};
 use language_barrier::provider::gemini::{GeminiConfig, GeminiProvider};
 use language_barrier::provider::openai::{OpenAIConfig, OpenAIProvider};
 use language_barrier::{Chat, Message, Tool, ToolDescription, Toolbox};
+use language_barrier::message::{Content, ContentPart, ToolCall, Function};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -130,24 +131,32 @@ async fn test_anthropic_integration_with_executor() {
 
     // Verify we got a response from the assistant
     info!("Verifying response");
-    debug!("Response role: {:?}", response.role);
-    assert_eq!(
-        response.role,
-        language_barrier::message::MessageRole::Assistant
-    );
-    assert!(response.content.is_some());
+    debug!("Response role: {:?}", response.role_str());
+    assert!(matches!(response, Message::Assistant { .. }));
+    
+    // Get content from the response
+    let content = match &response {
+        Message::Assistant { content, .. } => content,
+        _ => panic!("Expected assistant message"),
+    };
+    assert!(content.is_some());
 
     // Print the response for manual verification
     info!("Test completed successfully");
-    debug!("Response content: {:?}", response.content);
-    println!("Response: {:?}", response.content);
+    debug!("Response content: {:?}", content);
+    println!("Response: {:?}", content);
 
     // Verify token usage metadata is present
-    debug!("Token usage - input: {:?}, output: {:?}", 
-        response.metadata.get("input_tokens"),
-        response.metadata.get("output_tokens"));
-    assert!(response.metadata.contains_key("input_tokens"));
-    assert!(response.metadata.contains_key("output_tokens"));
+    match &response {
+        Message::Assistant { metadata, .. } => {
+            debug!("Token usage - input: {:?}, output: {:?}", 
+                metadata.get("input_tokens"),
+                metadata.get("output_tokens"));
+            assert!(metadata.contains_key("input_tokens"));
+            assert!(metadata.contains_key("output_tokens"));
+        },
+        _ => panic!("Expected assistant message"),
+    };
 }
 
 // Define a simple test tool for weather
@@ -239,47 +248,47 @@ async fn test_anthropic_tool_response_parsing() {
     let message = provider.parse(response_json.to_string()).unwrap();
     
     // Verify it parsed correctly
-    assert_eq!(message.role, language_barrier::message::MessageRole::Assistant);
+    assert!(matches!(message, Message::Assistant { .. }));
     
-    // Check for text content
-    match &message.content {
-        Some(language_barrier::message::Content::Text(text)) => {
-            assert_eq!(text, "I'll check the weather for you.");
-        }
-        _ => {
-            // It could also be Content::Parts depending on implementation
-            match &message.content {
-                Some(language_barrier::message::Content::Parts(parts)) => {
+    // Check for text content and tool calls
+    match &message {
+        Message::Assistant { content, tool_calls, metadata } => {
+            // Check content
+            match content {
+                Some(Content::Text(text)) => {
+                    assert_eq!(text, "I'll check the weather for you.");
+                },
+                Some(Content::Parts(parts)) => {
                     assert_eq!(parts.len(), 1);
                     match &parts[0] {
-                        language_barrier::message::ContentPart::Text { text } => {
+                        ContentPart::Text { text } => {
                             assert_eq!(text, "I'll check the weather for you.");
-                        }
+                        },
                         _ => panic!("Expected text content part"),
                     }
-                }
-                _ => panic!("Expected text or parts content"),
+                },
+                None => panic!("Expected content to be present"),
             }
-        }
+            
+            // Verify tool calls are present
+            assert!(!tool_calls.is_empty());
+            assert_eq!(tool_calls.len(), 1);
+            
+            // Check first tool call
+            let tool_call = &tool_calls[0];
+            assert_eq!(tool_call.id, "tool_call_123");
+            assert_eq!(tool_call.function.name, "get_weather");
+            
+            // Parse arguments to verify
+            let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments).unwrap();
+            assert_eq!(args["location"], "San Francisco");
+            
+            // Verify token usage metadata is present
+            assert_eq!(metadata["input_tokens"], 25);
+            assert_eq!(metadata["output_tokens"], 42);
+        },
+        _ => panic!("Expected assistant message"),
     }
-    
-    // Verify tool calls are present
-    assert!(message.tool_calls.is_some());
-    let tool_calls = message.tool_calls.unwrap();
-    assert_eq!(tool_calls.len(), 1);
-    
-    // Check first tool call
-    let tool_call = &tool_calls[0];
-    assert_eq!(tool_call.id, "tool_call_123");
-    assert_eq!(tool_call.function.name, "get_weather");
-    
-    // Parse arguments to verify
-    let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments).unwrap();
-    assert_eq!(args["location"], "San Francisco");
-    
-    // Verify token usage metadata is present
-    assert_eq!(message.metadata["input_tokens"], 25);
-    assert_eq!(message.metadata["output_tokens"], 42);
 }
 
 #[tokio::test]
@@ -299,21 +308,18 @@ async fn test_anthropic_tool_result_conversion() {
     let mut chat = Chat::new(Claude::Haiku3)
         .with_system_prompt("You are a helpful assistant.");
     
-    // Add an assistant message with a tool call
-    let mut assistant_message = Message::assistant("I'll check the weather for you.");
-    
     // Create a tool call
-    let tool_call = language_barrier::message::ToolCall {
+    let tool_call = ToolCall {
         id: "call_123".to_string(),
         tool_type: "function".to_string(),
-        function: language_barrier::message::FunctionCall {
+        function: Function {
             name: "get_weather".to_string(),
             arguments: r#"{"location":"San Francisco"}"#.to_string(),
         },
     };
     
-    // Add the tool call to the assistant message
-    assistant_message.tool_calls = Some(vec![tool_call]);
+    // Add an assistant message with a tool call
+    let assistant_message = Message::assistant_with_tool_calls(vec![tool_call]);
     chat.add_message(assistant_message);
     
     // Add a tool response
@@ -405,21 +411,18 @@ async fn test_chat_process_tool_calls() {
     // Add a user message
     chat.add_message(Message::user("What's the weather in San Francisco?"));
     
-    // Create an assistant message with a tool call
-    let mut assistant_message = Message::assistant("I'll check the weather for you.");
-    
     // Create a tool call
-    let tool_call = language_barrier::message::ToolCall {
+    let tool_call = ToolCall {
         id: "call_123".to_string(),
         tool_type: "function".to_string(),
-        function: language_barrier::message::FunctionCall {
+        function: Function {
             name: "get_weather".to_string(),
             arguments: r#"{"location":"San Francisco"}"#.to_string(),
         },
     };
     
-    // Add the tool call to the assistant message
-    assistant_message.tool_calls = Some(vec![tool_call]);
+    // Create an assistant message with a tool call
+    let assistant_message = Message::assistant_with_tool_calls(vec![tool_call]);
     
     // Add the assistant message to chat
     chat.add_message(assistant_message.clone());
@@ -432,16 +435,16 @@ async fn test_chat_process_tool_calls() {
     
     // Check the tool message
     let tool_message = &chat.history[2];
-    assert_eq!(tool_message.role, language_barrier::message::MessageRole::Tool);
-    assert_eq!(tool_message.tool_call_id.as_ref().unwrap(), "call_123");
+    assert!(matches!(tool_message, Message::Tool { .. }));
     
-    // Verify the tool message content
-    match &tool_message.content {
-        Some(language_barrier::message::Content::Text(text)) => {
-            assert!(text.contains("Weather in San Francisco"));
-            assert!(text.contains("Sunny"));
+    // Extract and verify the tool message details
+    match tool_message {
+        Message::Tool { tool_call_id, content, .. } => {
+            assert_eq!(tool_call_id, "call_123");
+            assert!(content.contains("Weather in San Francisco"));
+            assert!(content.contains("Sunny"));
         }
-        _ => panic!("Expected text content"),
+        _ => panic!("Expected tool message"),
     }
 }
 
@@ -553,22 +556,30 @@ async fn test_gemini_integration_with_executor() {
 
     // Verify we got a response from the assistant
     info!("Verifying response");
-    debug!("Response role: {:?}", response.role);
-    assert_eq!(
-        response.role,
-        language_barrier::message::MessageRole::Assistant
-    );
-    assert!(response.content.is_some());
+    debug!("Response role: {:?}", response.role_str());
+    assert!(matches!(response, Message::Assistant { .. }));
+    
+    // Get content from the response
+    let content = match &response {
+        Message::Assistant { content, .. } => content,
+        _ => panic!("Expected assistant message"),
+    };
+    assert!(content.is_some());
 
     // Print the response for manual verification
     info!("Test completed successfully");
-    debug!("Response content: {:?}", response.content);
-    println!("Response: {:?}", response.content);
+    debug!("Response content: {:?}", content);
+    println!("Response: {:?}", content);
 
     // Verify token usage metadata is present (field names might be different from Anthropic)
-    debug!("Token usage metadata: {:?}", response.metadata);
-    assert!(response.metadata.contains_key("prompt_tokens") || 
-           response.metadata.contains_key("total_tokens"));
+    match &response {
+        Message::Assistant { metadata, .. } => {
+            debug!("Token usage metadata: {:?}", metadata);
+            assert!(metadata.contains_key("prompt_tokens") || 
+                   metadata.contains_key("total_tokens"));
+        },
+        _ => panic!("Expected assistant message"),
+    };
 }
 
 #[tokio::test]
@@ -683,20 +694,28 @@ async fn test_openai_integration_with_executor() {
 
     // Verify we got a response from the assistant
     info!("Verifying response");
-    debug!("Response role: {:?}", response.role);
-    assert_eq!(
-        response.role,
-        language_barrier::message::MessageRole::Assistant
-    );
-    assert!(response.content.is_some());
+    debug!("Response role: {:?}", response.role_str());
+    assert!(matches!(response, Message::Assistant { .. }));
+    
+    // Get content from the response
+    let content = match &response {
+        Message::Assistant { content, .. } => content,
+        _ => panic!("Expected assistant message"),
+    };
+    assert!(content.is_some());
 
     // Print the response for manual verification
     info!("Test completed successfully");
-    debug!("Response content: {:?}", response.content);
-    println!("Response: {:?}", response.content);
+    debug!("Response content: {:?}", content);
+    println!("Response: {:?}", content);
 
     // Verify token usage metadata is present
-    debug!("Token usage metadata: {:?}", response.metadata);
-    assert!(response.metadata.contains_key("prompt_tokens") || 
-           response.metadata.contains_key("total_tokens"));
+    match &response {
+        Message::Assistant { metadata, .. } => {
+            debug!("Token usage metadata: {:?}", metadata);
+            assert!(metadata.contains_key("prompt_tokens") || 
+                   metadata.contains_key("total_tokens"));
+        },
+        _ => panic!("Expected assistant message"),
+    };
 }

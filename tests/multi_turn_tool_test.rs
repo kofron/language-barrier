@@ -3,6 +3,7 @@ use language_barrier::SingleRequestExecutor;
 use language_barrier::model::{Claude, Sonnet35Version};
 use language_barrier::provider::anthropic::{AnthropicConfig, AnthropicProvider};
 use language_barrier::{Chat, Message, Tool, ToolDescription, Toolbox, Result};
+use language_barrier::message::{Content, ContentPart, ToolCall, Function};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -116,7 +117,12 @@ async fn test_multi_turn_conversation_with_tools() {
     // Get first response
     let response = match executor.send(chat).await {
         Ok(resp) => {
-            info!("Received first response: {:?}", resp.content);
+            match &resp {
+                Message::Assistant { content, .. } => {
+                    info!("Received first response: {:?}", content);
+                },
+                _ => {},
+            }
             resp
         },
         Err(e) => {
@@ -129,7 +135,12 @@ async fn test_multi_turn_conversation_with_tools() {
     };
     
     // The response should include a tool call for weather
-    assert!(response.tool_calls.is_some(), "Expected tool calls in the response");
+    match &response {
+        Message::Assistant { tool_calls, .. } => {
+            assert!(!tool_calls.is_empty(), "Expected tool calls in the response");
+        },
+        _ => panic!("Expected assistant message"),
+    }
     
     // Process tool calls
     let mut updated_chat = Chat::new(Claude::Sonnet35 { 
@@ -155,7 +166,12 @@ async fn test_multi_turn_conversation_with_tools() {
     // Get response to follow-up
     let follow_up_response = match executor.send(updated_chat).await {
         Ok(resp) => {
-            info!("Received follow-up response: {:?}", resp.content);
+            match &resp {
+                Message::Assistant { content, .. } => {
+                    info!("Received follow-up response: {:?}", content);
+                },
+                _ => {},
+            }
             resp
         },
         Err(e) => {
@@ -168,47 +184,63 @@ async fn test_multi_turn_conversation_with_tools() {
     };
     
     // The follow-up response should also include a tool call
-    assert!(follow_up_response.tool_calls.is_some(), "Expected tool calls in follow-up response");
+    match &follow_up_response {
+        Message::Assistant { tool_calls, .. } => {
+            assert!(!tool_calls.is_empty(), "Expected tool calls in follow-up response");
+        },
+        _ => panic!("Expected assistant message"),
+    }
     
     // Inspect the follow-up response content to verify it references New York
-    let references_new_york = match &follow_up_response.content {
-        Some(language_barrier::message::Content::Text(text)) => {
-            info!("Follow-up text response: {}", text);
-            text.contains("New York")
-        },
-        Some(language_barrier::message::Content::Parts(parts)) => {
-            parts.iter().any(|part| match part {
-                language_barrier::message::ContentPart::Text { text } => {
-                    info!("Follow-up part: {}", text);
+    let references_new_york = match &follow_up_response {
+        Message::Assistant { content, tool_calls, .. } => {
+            match content {
+                Some(Content::Text(text)) => {
+                    info!("Follow-up text response: {}", text);
                     text.contains("New York")
                 },
-                _ => false,
-            })
+                Some(Content::Parts(parts)) => {
+                    parts.iter().any(|part| match part {
+                        ContentPart::Text { text } => {
+                            info!("Follow-up part: {}", text);
+                            text.contains("New York")
+                        },
+                        _ => false,
+                    })
+                },
+                None => {
+                    // Check if tool call references New York if there's no content
+                    tool_calls.iter().any(|call| call.function.arguments.contains("New York"))
+                }
+            }
         },
-        None => {
-            // Check if tool call references New York if there's no content
-            follow_up_response.tool_calls.as_ref().map_or(false, |calls| {
-                calls.iter().any(|call| call.function.arguments.contains("New York"))
-            })
-        }
+        _ => panic!("Expected assistant message"),
     };
     
     // Alternative check in tool calls for New York reference
-    let tool_calls_reference_new_york = follow_up_response.tool_calls.as_ref().map_or(false, |calls| {
-        calls.iter().any(|call| {
-            info!("Follow-up tool call: {} - {}", call.function.name, call.function.arguments);
-            call.function.arguments.contains("New York")
-        })
-    });
+    let tool_calls_reference_new_york = match &follow_up_response {
+        Message::Assistant { tool_calls, .. } => {
+            tool_calls.iter().any(|call| {
+                info!("Follow-up tool call: {} - {}", call.function.name, call.function.arguments);
+                call.function.arguments.contains("New York")
+            })
+        },
+        _ => panic!("Expected assistant message"),
+    };
     
     assert!(references_new_york || tool_calls_reference_new_york, 
             "Follow-up response should reference New York");
     
     // Check that the model remembered previous context - it shouldn't repeat the San Francisco weather
     // when we asked about New York
-    let response_text = match &follow_up_response.content {
-        Some(language_barrier::message::Content::Text(text)) => text,
-        _ => "",
+    let response_text = match &follow_up_response {
+        Message::Assistant { content, .. } => {
+            match content {
+                Some(Content::Text(text)) => text.clone(),
+                _ => String::new(),
+            }
+        },
+        _ => String::new(),
     };
     
     assert!(!response_text.contains("San Francisco"), 

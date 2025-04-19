@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use language_barrier::{
     Chat, Message, Mistral, Secret, SingleRequestExecutor, Tool, ToolDescription, Toolbox,
 };
+use language_barrier::message::{Content, ContentPart, Function, ToolCall};
 use language_barrier::provider::mistral::{MistralConfig, MistralProvider};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -129,9 +130,13 @@ async fn test_mistral_tools() {
     // Send the chat to get a response
     let response = executor.send(chat).await.unwrap();
     
-    // Create a new chat for the next request if we need to continue
-    // Process any tool calls in the response
-    if response.tool_calls.is_some() {
+    // Check if the response includes tool calls
+    let has_tool_calls = match &response {
+        Message::Assistant { tool_calls, .. } => !tool_calls.is_empty(),
+        _ => false,
+    };
+    
+    if has_tool_calls {
         println!("Tool calls detected, processing...");
         
         // Create a new chat with the same configuration
@@ -156,35 +161,45 @@ async fn test_mistral_tools() {
         assert_eq!(toolbox.get_call_count(), 1);
         
         // Check that the final response contains the correct result
-        match &final_response.content {
-            Some(language_barrier::Content::Text(text)) => {
-                println!("Final response: {}", text);
-                assert!(text.contains("56088"));
+        match &final_response {
+            Message::Assistant { content, .. } => {
+                match content {
+                    Some(Content::Text(text)) => {
+                        println!("Final response: {}", text);
+                        assert!(text.contains("56088"));
+                    },
+                    _ => {
+                        println!("Unexpected content format");
+                        assert!(false, "Expected text content");
+                    }
+                }
             },
-            _ => {
-                println!("Final response: {:?}", final_response.content);
-                assert!(false, "Expected text content");
-            }
+            _ => assert!(false, "Expected assistant message"),
         }
     } else {
         // Some models might get the calculation right without using tools
         println!("No tool calls, checking if response is still correct...");
         
-        match &response.content {
-            Some(language_barrier::Content::Text(text)) => {
-                println!("Response: {}", text);
-                
-                // Check if the response contains the correct result even without tool use
-                assert!(
-                    text.contains("56088") || 
-                    text.contains("56,088") || 
-                    text.contains("123 × 456 = 56088")
-                );
+        match &response {
+            Message::Assistant { content, .. } => {
+                match content {
+                    Some(Content::Text(text)) => {
+                        println!("Response: {}", text);
+                        
+                        // Check if the response contains the correct result even without tool use
+                        assert!(
+                            text.contains("56088") || 
+                            text.contains("56,088") || 
+                            text.contains("123 × 456 = 56088")
+                        );
+                    },
+                    _ => {
+                        println!("Unexpected content format");
+                        assert!(false, "Expected text content");
+                    }
+                }
             },
-            _ => {
-                println!("Response content: {:?}", response.content);
-                assert!(false, "Expected text content");
-            }
+            _ => assert!(false, "Expected assistant message"),
         }
     }
 }

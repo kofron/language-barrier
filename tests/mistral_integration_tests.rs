@@ -4,6 +4,7 @@ use language_barrier::model::Mistral;
 use language_barrier::provider::HTTPProvider;
 use language_barrier::provider::mistral::{MistralConfig, MistralProvider};
 use language_barrier::{Chat, Message, Tool, ToolDescription, Toolbox};
+use language_barrier::message::{Content, ContentPart, ToolCall, Function};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -122,22 +123,30 @@ async fn test_mistral_integration_with_executor() {
 
     // Verify we got a response from the assistant
     info!("Verifying response");
-    debug!("Response role: {:?}", response.role);
-    assert_eq!(
-        response.role,
-        language_barrier::message::MessageRole::Assistant
-    );
-    assert!(response.content.is_some());
+    debug!("Response role: {:?}", response.role_str());
+    assert!(matches!(response, Message::Assistant { .. }));
+    
+    // Get content from the response
+    let content = match &response {
+        Message::Assistant { content, .. } => content,
+        _ => panic!("Expected assistant message"),
+    };
+    assert!(content.is_some());
 
     // Print the response for manual verification
     info!("Test completed successfully");
-    debug!("Response content: {:?}", response.content);
-    println!("Response: {:?}", response.content);
+    debug!("Response content: {:?}", content);
+    println!("Response: {:?}", content);
 
     // Verify token usage metadata is present
-    debug!("Token usage metadata: {:?}", response.metadata);
-    assert!(response.metadata.contains_key("prompt_tokens") || 
-           response.metadata.contains_key("total_tokens"));
+    match &response {
+        Message::Assistant { metadata, .. } => {
+            debug!("Token usage metadata: {:?}", metadata);
+            assert!(metadata.contains_key("prompt_tokens") || 
+                   metadata.contains_key("total_tokens"));
+        },
+        _ => panic!("Expected assistant message"),
+    };
 }
 
 // Define a simple test tool for weather

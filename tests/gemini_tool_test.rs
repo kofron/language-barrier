@@ -3,6 +3,7 @@ use language_barrier::SingleRequestExecutor;
 use language_barrier::model::Gemini;
 use language_barrier::provider::gemini::{GeminiConfig, GeminiProvider};
 use language_barrier::{Chat, Message, Result, Tool, ToolDescription, Toolbox};
+use language_barrier::message::{Content, ContentPart, ToolCall, Function};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -104,7 +105,12 @@ async fn test_gemini_tools() {
     // Get response
     let response = match executor.send(chat).await {
         Ok(resp) => {
-            info!("Received response: {:?}", resp.content);
+            match &resp {
+                Message::Assistant { content, .. } => {
+                    info!("Received response: {:?}", content);
+                },
+                _ => {},
+            }
             resp
         }
         Err(e) => {
@@ -114,22 +120,32 @@ async fn test_gemini_tools() {
     };
 
     // Check if the response includes a tool call
-    if let Some(tool_calls) = &response.tool_calls {
-        info!("Response contains {} tool calls", tool_calls.len());
-        for tool_call in tool_calls {
-            info!(
-                "Tool call: {} - {}",
-                tool_call.function.name, tool_call.function.arguments
-            );
-        }
-        assert!(tool_calls.len() > 0, "Expected at least one tool call");
-    } else {
-        info!("Response does not contain tool calls");
-        // Tool calls aren't guaranteed, so this isn't a failure
+    match &response {
+        Message::Assistant { tool_calls, .. } => {
+            if !tool_calls.is_empty() {
+                info!("Response contains {} tool calls", tool_calls.len());
+                for tool_call in tool_calls {
+                    info!(
+                        "Tool call: {} - {}",
+                        tool_call.function.name, tool_call.function.arguments
+                    );
+                }
+                assert!(!tool_calls.is_empty(), "Expected at least one tool call");
+            } else {
+                info!("Response does not contain tool calls");
+                // Tool calls aren't guaranteed, so this isn't a failure
+            }
+        },
+        _ => panic!("Expected assistant message"),
     }
 
     // Create a new chat with the tool response
-    if response.tool_calls.is_some() {
+    let has_tool_calls = match &response {
+        Message::Assistant { tool_calls, .. } => !tool_calls.is_empty(),
+        _ => false,
+    };
+    
+    if has_tool_calls {
         let mut updated_chat = Chat::new(Gemini::Flash15)
             .with_system_prompt(
                 "You are a helpful AI assistant that can provide weather information.",
@@ -155,11 +171,13 @@ async fn test_gemini_tools() {
         // Get follow-up response
         let follow_up = match executor.send(updated_chat).await {
             Ok(resp) => {
-                info!("Received follow-up response: {:?}", resp.content);
-                assert!(
-                    resp.content.is_some(),
-                    "Expected content in follow-up response"
-                );
+                match &resp {
+                    Message::Assistant { content, .. } => {
+                        info!("Received follow-up response: {:?}", content);
+                        assert!(content.is_some(), "Expected content in follow-up response");
+                    },
+                    _ => panic!("Expected assistant message"),
+                }
                 resp
             }
             Err(e) => {
@@ -169,46 +187,56 @@ async fn test_gemini_tools() {
         };
         
         // Inspect the follow-up response content
-        if let Some(content) = &follow_up.content {
-            match content {
-                language_barrier::message::Content::Text(text) => {
-                    // The response should mention London (the follow-up question location)
-                    assert!(text.contains("London") || 
-                           follow_up.tool_calls.as_ref().map_or(false, |calls| {
-                               calls.iter().any(|call| call.function.arguments.contains("London"))
-                           }),
-                           "Follow-up response should reference London");
-                    
-                    info!("Follow-up response correctly references the new location");
-                },
-                language_barrier::message::Content::Parts(parts) => {
-                    let has_london = parts.iter().any(|part| {
-                        match part {
-                            language_barrier::message::ContentPart::Text { text } => text.contains("London"),
-                            _ => false,
-                        }
-                    });
-                    
-                    assert!(has_london || 
-                           follow_up.tool_calls.as_ref().map_or(false, |calls| {
-                               calls.iter().any(|call| call.function.arguments.contains("London"))
-                           }),
-                           "Follow-up response should reference London");
-                    
-                    info!("Follow-up response correctly references the new location");
+        match &follow_up {
+            Message::Assistant { content, tool_calls, .. } => {
+                match content {
+                    Some(Content::Text(text)) => {
+                        // The response should mention London (the follow-up question location)
+                        let tool_call_has_london = tool_calls.iter().any(|call| {
+                            call.function.arguments.contains("London")
+                        });
+                        
+                        assert!(text.contains("London") || tool_call_has_london,
+                                "Follow-up response should reference London");
+                        
+                        info!("Follow-up response correctly references the new location");
+                    },
+                    Some(Content::Parts(parts)) => {
+                        let has_london = parts.iter().any(|part| {
+                            match part {
+                                ContentPart::Text { text } => text.contains("London"),
+                                _ => false,
+                            }
+                        });
+                        
+                        let tool_call_has_london = tool_calls.iter().any(|call| {
+                            call.function.arguments.contains("London")
+                        });
+                        
+                        assert!(has_london || tool_call_has_london,
+                                "Follow-up response should reference London");
+                        
+                        info!("Follow-up response correctly references the new location");
+                    },
+                    None => {
+                        // If no content, check tool calls
+                        assert!(tool_calls.iter().any(|call| call.function.arguments.contains("London")),
+                                "With no content, tool calls should reference London");
+                    }
                 }
-            }
-        }
-        
-        // Check if the follow-up also uses tools
-        if let Some(tool_calls) = &follow_up.tool_calls {
-            info!("Follow-up contains {} tool calls", tool_calls.len());
-            for tool_call in tool_calls {
-                info!("Follow-up tool call: {} - {}", tool_call.function.name, tool_call.function.arguments);
-                // Check if the tool call is for London weather
-                assert!(tool_call.function.arguments.contains("London"), 
-                       "Tool call should be for London weather");
-            }
+                
+                // Check if the follow-up also uses tools
+                if !tool_calls.is_empty() {
+                    info!("Follow-up contains {} tool calls", tool_calls.len());
+                    for tool_call in tool_calls {
+                        info!("Follow-up tool call: {} - {}", tool_call.function.name, tool_call.function.arguments);
+                        // Check if the tool call is for London weather
+                        assert!(tool_call.function.arguments.contains("London"), 
+                                "Tool call should be for London weather");
+                    }
+                }
+            },
+            _ => panic!("Expected assistant message"),
         }
         
         info!("Gemini tools test successful with proper follow-up question handling");
