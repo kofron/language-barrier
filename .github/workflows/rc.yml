@@ -1,0 +1,31 @@
+name: Release Candidate
+
+on:
+  push:
+    branches: ['rc']
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  integration_tests:
+    name: Complete Integration Tests
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+    
+    - name: Cache Rust dependencies
+      uses: Swatinem/rust-cache@v2
+    
+    - name: Run all tests (including API integration tests)
+      run: cargo test --verbose --all-features
+      env:
+        RUST_BACKTRACE: 1
+        # Add your LLM API keys as secrets
+        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
