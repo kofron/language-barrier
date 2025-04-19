@@ -1,44 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Represents the role of a message in a conversation
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum MessageRole {
-    /// Message from the system (instructions)
-    System,
-    /// Message from the user
-    User,
-    /// Message from the assistant
-    Assistant,
-    /// Message containing a function call
-    Function,
-    /// Message from a tool
-    Tool,
-}
-
-impl MessageRole {
-    /// Returns a string representation of the role
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use language_barrier::message::MessageRole;
-    ///
-    /// let role = MessageRole::User;
-    /// assert_eq!(role.as_str(), "user");
-    /// ```
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            MessageRole::System => "system",
-            MessageRole::User => "user",
-            MessageRole::Assistant => "assistant",
-            MessageRole::Function => "function",
-            MessageRole::Tool => "tool",
-        }
-    }
-}
-
 /// Represents the content of a message, which can be text or other structured data
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -140,8 +102,8 @@ impl ContentPart {
     /// let image_url = ImageUrl::new("https://example.com/image.jpg");
     /// let part = ContentPart::image_url(image_url);
     /// ```
-    pub fn image_url(image_url: ImageUrl) -> Self {
-        ContentPart::ImageUrl { image_url }
+    pub fn image_url(image_url: impl Into<String>) -> Self {
+        ContentPart::ImageUrl { image_url: ImageUrl::new(image_url) }
     }
 
     /// Returns true if the part is empty
@@ -208,12 +170,12 @@ impl ImageUrl {
     }
 }
 
-/// Represents a function call
+/// Represents a function definition within a tool call
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FunctionCall {
+pub struct Function {
     /// The name of the function
     pub name: String,
-    /// The arguments to the function
+    /// The arguments to the function (typically JSON)
     pub arguments: String,
 }
 
@@ -225,33 +187,65 @@ pub struct ToolCall {
     /// The type of the tool call
     #[serde(rename = "type")]
     pub tool_type: String,
-    /// The function call
-    pub function: FunctionCall,
+    /// The function definition
+    pub function: Function,
 }
 
 /// Represents a message in a conversation
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Message {
-    /// The role of the message sender
-    pub role: MessageRole,
-    /// The content of the message
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<Content>,
-    /// The name of the sender (optional)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    /// The function call (for assistant messages)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub function_call: Option<FunctionCall>,
-    /// The tool calls (for assistant messages)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_calls: Option<Vec<ToolCall>>,
-    /// The ID of the tool call this message is responding to
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_call_id: Option<String>,
-    /// Additional provider-specific metadata
-    #[serde(flatten, skip_serializing_if = "HashMap::is_empty")]
-    pub metadata: HashMap<String, serde_json::Value>,
+#[serde(tag = "role", content = "content")]
+pub enum Message {
+    /// Message from the system (instructions)
+    #[serde(rename = "system")]
+    System {
+        /// The content of the system message
+        #[serde(flatten)]
+        content: String,
+        /// Additional provider-specific metadata
+        #[serde(flatten, skip_serializing_if = "HashMap::is_empty")]
+        metadata: HashMap<String, serde_json::Value>,
+    },
+
+    /// Message from the user
+    #[serde(rename = "user")]
+    User {
+        /// The content of the user message
+        #[serde(flatten)]
+        content: Content,
+        /// The name of the user (optional)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        /// Additional provider-specific metadata
+        #[serde(flatten, skip_serializing_if = "HashMap::is_empty")]
+        metadata: HashMap<String, serde_json::Value>,
+    },
+
+    /// Message from the assistant
+    #[serde(rename = "assistant")]
+    Assistant {
+        /// The content of the assistant message
+        #[serde(skip_serializing_if = "Option::is_none")]
+        content: Option<Content>,
+        /// The tool calls made by the assistant
+        #[serde(skip_serializing_if = "Vec::is_empty", default)]
+        tool_calls: Vec<ToolCall>,
+        /// Additional provider-specific metadata
+        #[serde(flatten, skip_serializing_if = "HashMap::is_empty")]
+        metadata: HashMap<String, serde_json::Value>,
+    },
+
+    /// Message from a tool
+    #[serde(rename = "tool")]
+    Tool {
+        /// The ID of the tool call this message is responding to
+        tool_call_id: String,
+        /// The content of the tool response
+        #[serde(flatten)]
+        content: String,
+        /// Additional provider-specific metadata
+        #[serde(flatten, skip_serializing_if = "HashMap::is_empty")]
+        metadata: HashMap<String, serde_json::Value>,
+    },
 }
 
 impl Message {
@@ -265,13 +259,8 @@ impl Message {
     /// let msg = Message::system("You are a helpful assistant.");
     /// ```
     pub fn system(content: impl Into<String>) -> Self {
-        Self {
-            role: MessageRole::System,
-            content: Some(Content::Text(content.into())),
-            name: None,
-            function_call: None,
-            tool_calls: None,
-            tool_call_id: None,
+        Message::System {
+            content: content.into(),
             metadata: HashMap::new(),
         }
     }
@@ -286,13 +275,47 @@ impl Message {
     /// let msg = Message::user("Hello, can you help me?");
     /// ```
     pub fn user(content: impl Into<String>) -> Self {
-        Self {
-            role: MessageRole::User,
-            content: Some(Content::Text(content.into())),
+        Message::User {
+            content: Content::Text(content.into()),
             name: None,
-            function_call: None,
-            tool_calls: None,
-            tool_call_id: None,
+            metadata: HashMap::new(),
+        }
+    }
+    
+    /// Creates a new user message with a name
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use language_barrier::message::Message;
+    ///
+    /// let msg = Message::user_with_name("John", "Hello, can you help me?");
+    /// ```
+    pub fn user_with_name(name: impl Into<String>, content: impl Into<String>) -> Self {
+        Message::User {
+            content: Content::Text(content.into()),
+            name: Some(name.into()),
+            metadata: HashMap::new(),
+        }
+    }
+
+    /// Creates a new user message with multimodal content
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use language_barrier::message::{Message, Content, ContentPart};
+    ///
+    /// let parts = vec![
+    ///     ContentPart::text("Look at this image:"),
+    ///     ContentPart::image_url("https://example.com/image.jpg".into()),
+    /// ];
+    /// let msg = Message::user_with_parts(parts);
+    /// ```
+    pub fn user_with_parts(parts: Vec<ContentPart>) -> Self {
+        Message::User {
+            content: Content::Parts(parts),
+            name: None,
             metadata: HashMap::new(),
         }
     }
@@ -307,34 +330,34 @@ impl Message {
     /// let msg = Message::assistant("I'm here to help you.");
     /// ```
     pub fn assistant(content: impl Into<String>) -> Self {
-        Self {
-            role: MessageRole::Assistant,
+        Message::Assistant {
             content: Some(Content::Text(content.into())),
-            name: None,
-            function_call: None,
-            tool_calls: None,
-            tool_call_id: None,
+            tool_calls: Vec::new(),
             metadata: HashMap::new(),
         }
     }
 
-    /// Creates a new function message
+    /// Creates a new assistant message with tool calls
     ///
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::message::Message;
+    /// use language_barrier::message::{Message, ToolCall, Function};
     ///
-    /// let msg = Message::function("get_weather", "The weather is sunny.");
+    /// let tool_call = ToolCall {
+    ///     id: "call_123".to_string(),
+    ///     tool_type: "function".to_string(),
+    ///     function: Function {
+    ///         name: "get_weather".to_string(),
+    ///         arguments: "{\"location\":\"San Francisco\"}".to_string(),
+    ///     },
+    /// };
+    /// let msg = Message::assistant_with_tool_calls(vec![tool_call]);
     /// ```
-    pub fn function(name: impl Into<String>, content: impl Into<String>) -> Self {
-        Self {
-            role: MessageRole::Function,
-            content: Some(Content::Text(content.into())),
-            name: Some(name.into()),
-            function_call: None,
-            tool_calls: None,
-            tool_call_id: None,
+    pub fn assistant_with_tool_calls(tool_calls: Vec<ToolCall>) -> Self {
+        Message::Assistant {
+            content: None,
+            tool_calls,
             metadata: HashMap::new(),
         }
     }
@@ -349,49 +372,33 @@ impl Message {
     /// let msg = Message::tool("tool123", "The result is 42.");
     /// ```
     pub fn tool(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
-        Self {
-            role: MessageRole::Tool,
-            content: Some(Content::Text(content.into())),
-            name: None,
-            function_call: None,
-            tool_calls: None,
-            tool_call_id: Some(tool_call_id.into()),
+        Message::Tool {
+            tool_call_id: tool_call_id.into(),
+            content: content.into(),
             metadata: HashMap::new(),
         }
     }
 
-    /// Sets the name and returns self for method chaining
+    /// Returns the role of the message as a string
     ///
     /// # Examples
     ///
     /// ```
     /// use language_barrier::message::Message;
     ///
-    /// let msg = Message::user("Hello")
-    ///     .with_name("John");
+    /// let msg = Message::user("Hello");
+    /// assert_eq!(msg.role_str(), "user");
     /// ```
-    pub fn with_name(mut self, name: impl Into<String>) -> Self {
-        self.name = Some(name.into());
-        self
+    pub fn role_str(&self) -> &'static str {
+        match self {
+            Message::System { .. } => "system",
+            Message::User { .. } => "user",
+            Message::Assistant { .. } => "assistant",
+            Message::Tool { .. } => "tool",
+        }
     }
 
-    /// Sets multimodal content and returns self for method chaining
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use language_barrier::message::{Message, ContentPart};
-    ///
-    /// let parts = vec![ContentPart::text("Hello")];
-    /// let msg = Message::user("")
-    ///     .with_content_parts(parts);
-    /// ```
-    pub fn with_content_parts(mut self, parts: Vec<ContentPart>) -> Self {
-        self.content = Some(Content::Parts(parts));
-        self
-    }
-
-    /// Adds metadata and returns self for method chaining
+    /// Adds metadata and returns a new message
     ///
     /// # Examples
     ///
@@ -402,26 +409,33 @@ impl Message {
     /// let msg = Message::user("Hello")
     ///     .with_metadata("priority", json!(5));
     /// ```
-    pub fn with_metadata(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
-        self.metadata.insert(key.into(), value);
-        self
+    pub fn with_metadata(self, key: impl Into<String>, value: serde_json::Value) -> Self {
+        match self {
+            Message::System { content, mut metadata } => {
+                metadata.insert(key.into(), value);
+                Message::System { content, metadata }
+            }
+            Message::User { content, name, mut metadata } => {
+                metadata.insert(key.into(), value);
+                Message::User { content, name, metadata }
+            }
+            Message::Assistant { content, tool_calls, mut metadata } => {
+                metadata.insert(key.into(), value);
+                Message::Assistant { content, tool_calls, metadata }
+            }
+            Message::Tool { tool_call_id, content, mut metadata } => {
+                metadata.insert(key.into(), value);
+                Message::Tool { tool_call_id, content, metadata }
+            }
+        }
     }
+
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
-
-    #[test]
-    fn test_message_role_serialization() {
-        let role = MessageRole::User;
-        let serialized = serde_json::to_string(&role).unwrap();
-        assert_eq!(serialized, "\"user\"");
-
-        let deserialized: MessageRole = serde_json::from_str("\"assistant\"").unwrap();
-        assert_eq!(deserialized, MessageRole::Assistant);
-    }
 
     #[test]
     fn test_content_serialization() {
@@ -450,14 +464,84 @@ mod tests {
         assert_eq!(parsed["content"], "Hello, world!");
 
         // Test with metadata
-        let msg = Message::user("Hello")
-            .with_metadata("priority", json!(5))
-            .with_name("John");
+        let msg = Message::user_with_name("John", "Hello")
+            .with_metadata("priority", json!(5));
         let serialized = serde_json::to_string(&msg).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&serialized).unwrap();
 
         assert_eq!(parsed["role"], "user");
         assert_eq!(parsed["name"], "John");
         assert_eq!(parsed["priority"], 5);
+    }
+
+    #[test]
+    fn test_system_message() {
+        let msg = Message::system("You are a helpful assistant");
+        match msg {
+            Message::System { content, metadata } => {
+                assert_eq!(content, "You are a helpful assistant");
+                assert!(metadata.is_empty());
+            }
+            _ => panic!("Expected System variant"),
+        }
+    }
+
+    #[test]
+    fn test_user_message() {
+        let msg = Message::user_with_name("John", "Hello");
+        match msg {
+            Message::User { content, name, metadata } => {
+                assert_eq!(content, Content::Text("Hello".to_string()));
+                assert_eq!(name, Some("John".to_string()));
+                assert!(metadata.is_empty());
+            }
+            _ => panic!("Expected User variant"),
+        }
+    }
+
+    #[test]
+    fn test_assistant_message() {
+        let msg = Message::assistant("I'll help you");
+        match msg {
+            Message::Assistant { content, tool_calls, metadata } => {
+                assert_eq!(content, Some(Content::Text("I'll help you".to_string())));
+                assert!(tool_calls.is_empty());
+                assert!(metadata.is_empty());
+            }
+            _ => panic!("Expected Assistant variant"),
+        }
+
+        let tool_call = ToolCall {
+            id: "call_123".to_string(),
+            tool_type: "function".to_string(),
+            function: Function {
+                name: "get_weather".to_string(),
+                arguments: "{\"location\":\"San Francisco\"}".to_string(),
+            },
+        };
+        
+        let msg = Message::assistant_with_tool_calls(vec![tool_call]);
+        match msg {
+            Message::Assistant { content, tool_calls, metadata } => {
+                assert_eq!(content, None);
+                assert_eq!(tool_calls.len(), 1);
+                assert_eq!(tool_calls[0].id, "call_123");
+                assert!(metadata.is_empty());
+            }
+            _ => panic!("Expected Assistant variant"),
+        }
+    }
+
+    #[test]
+    fn test_tool_message() {
+        let msg = Message::tool("call_123", "The weather is sunny");
+        match msg {
+            Message::Tool { tool_call_id, content, metadata } => {
+                assert_eq!(tool_call_id, "call_123");
+                assert_eq!(content, "The weather is sunny");
+                assert!(metadata.is_empty());
+            }
+            _ => panic!("Expected Tool variant"),
+        }
     }
 }
