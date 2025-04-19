@@ -463,6 +463,49 @@ Additionally, we've restructured the codebase to move client-related functionali
 3. Implemented a more flexible provider hierarchy with appropriate traits and implementations
 4. Created stub implementations of mock providers to support testing
 
+#### 2025-04-18: Typed Tool View Pattern Implementation
+
+1. **Type-Safe Tool Call Handling**:
+   - Implemented a "typed view" pattern for tool calls that provides type safety without making core types generic
+   - Created a clear separation between untyped message storage and typed tool handling
+   - Leveraged Rust's type system and pattern matching for safe tool call processing
+   - Made tool integration fully optional and non-intrusive to the core API
+
+2. **Implementation Details**:
+   - **Core Untyped Toolbox**:
+     - Simplified the `Toolbox` trait to be non-generic, working with untyped JSON values
+     - Added `describe()` method to get tool descriptions for LLM prompt construction
+     - Added `execute()` method for actual tool execution with string results
+   
+   - **Typed Layer**:
+     - Created `TypedToolbox<T>` trait that extends the base `Toolbox` and adds type-safe methods
+     - Added `parse_tool_call()` method to convert untyped ToolCall to typed representation
+     - Added `execute_typed()` method for executing tools with strongly typed inputs
+   
+   - **View Pattern**:
+     - Implemented `ToolCallView<T, TB>` struct that provides a typed view over messages
+     - View takes a reference to both a message and a typed toolbox
+     - Provides methods to extract typed tool calls and check for tool call presence
+     - Leverages serde for type-safe JSON deserialization
+
+3. **Chat Integration**:
+   - Updated `Chat` struct to include an optional untyped `Toolbox`
+   - Added methods for setting and managing toolboxes
+   - Implemented `process_tool_calls()` to automatically handle tool execution
+   - Added `tool_descriptions()` to get tool descriptions for LLM prompting
+
+4. **Benefits of the Design**:
+   - **Clean Separation of Concerns**: Core types remain simple and non-generic
+   - **Type Safety Where Needed**: Tool implementations can be fully type-safe
+   - **Optional Integration**: Tools are completely optional and non-intrusive
+   - **Pattern Matching**: Enables exhaustive pattern matching on tool requests
+   - **No Dynamic Type Checking**: Avoids runtime type errors through compile-time checking
+   - **Extensibility**: Easy to add new tool types without changing core types
+
+This design achieves the goal of providing type safety for tools without sacrificing the simplicity of the core API. It uses Rust's strong type system to ensure that tool inputs and outputs are handled correctly, while keeping the message storage layer simple and efficient. The view pattern provides a clean abstraction that bridges the gap between the untyped storage and the typed tool handling.
+
+The implementation follows a principle of "pay for what you use" - users who don't need tools aren't burdened with the complexity, while those who do can opt into the type-safe layer. This balances flexibility, performance, and safety in an elegant way that leverages Rust's strengths.
+
 ## Future Directions
 
 1. **Streaming**: Support for streaming responses from LLMs.

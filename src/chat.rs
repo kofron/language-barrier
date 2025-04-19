@@ -1,8 +1,8 @@
 use crate::ModelInfo;
 use crate::compactor::{ChatHistoryCompactor, DropOldestCompactor};
 use crate::message::{Content, Message};
-
 use crate::token::TokenCounter;
+use crate::tool::{Toolbox, ToolDescription};
 
 /// The main Chat client that users will interact with
 pub struct Chat<M: ModelInfo> {
@@ -17,6 +17,9 @@ pub struct Chat<M: ModelInfo> {
     pub history: Vec<Message>,
     token_counter: TokenCounter,
     compactor: Box<dyn ChatHistoryCompactor>,
+    
+    // Optional toolbox for function/tool calling
+    toolbox: Option<Box<dyn Toolbox>>,
 }
 
 impl<M> Chat<M>
@@ -32,6 +35,7 @@ where
             history: Vec::new(),
             token_counter: TokenCounter::default(),
             compactor: Box::<DropOldestCompactor>::default(),
+            toolbox: None,
         }
     }
 
@@ -109,5 +113,69 @@ where
     /// Gets the current token count
     pub fn tokens_used(&self) -> usize {
         self.token_counter.total()
+    }
+    
+    /// Sets a toolbox for function/tool calling
+    pub fn with_toolbox<T: Toolbox + 'static>(mut self, toolbox: T) -> Self {
+        self.toolbox = Some(Box::new(toolbox));
+        self
+    }
+    
+    /// Sets a toolbox at runtime
+    pub fn set_toolbox<T: Toolbox + 'static>(&mut self, toolbox: T) {
+        self.toolbox = Some(Box::new(toolbox));
+    }
+    
+    /// Gets the tool descriptions from the current toolbox
+    pub fn tool_descriptions(&self) -> Vec<ToolDescription> {
+        match &self.toolbox {
+            Some(toolbox) => toolbox.describe(),
+            None => Vec::new(),
+        }
+    }
+    
+    /// Processes tool calls from a message and adds tool response messages
+    /// 
+    /// This function examines an assistant message for tool calls, executes them
+    /// using the current toolbox, and adds the tool response messages to the history.
+    pub fn process_tool_calls(&mut self, assistant_message: &Message) -> crate::error::Result<()> {
+        // If there's no toolbox or no tool calls, there's nothing to do
+        if self.toolbox.is_none() || assistant_message.tool_calls.is_none() {
+            return Ok(());
+        }
+        
+        let tool_calls = assistant_message.tool_calls.as_ref().unwrap();
+        
+        // Process each tool call and collect responses first
+        let mut responses = Vec::new();
+        
+        for tool_call in tool_calls {
+            // Execute the tool call
+            let result = self.toolbox.as_ref().unwrap().execute(
+                &tool_call.function.name, 
+                serde_json::from_str(&tool_call.function.arguments)?
+            )?;
+            
+            // Create a tool response message
+            let tool_message = Message::tool(tool_call.id.clone(), result);
+            responses.push(tool_message);
+        }
+        
+        // Now add all the responses to history
+        for message in responses {
+            self.add_message(message);
+        }
+        
+        Ok(())
+    }
+    
+    /// Clears the toolbox
+    pub fn clear_toolbox(&mut self) {
+        self.toolbox = None;
+    }
+    
+    /// Returns true if the chat has a toolbox configured
+    pub fn has_toolbox(&self) -> bool {
+        self.toolbox.is_some()
     }
 }

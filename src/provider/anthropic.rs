@@ -277,6 +277,30 @@ impl AnthropicProvider {
         // Get model ID for the chat model
         let model_id = Self::id_for_model(chat.model).to_string();
         debug!("Using model ID: {}", model_id);
+        
+        // Convert tool descriptions if a toolbox is provided
+        let tools = if chat.has_toolbox() {
+            let tool_descriptions = chat.tool_descriptions();
+            debug!("Converting {} tool descriptions to Anthropic format", tool_descriptions.len());
+            
+            if !tool_descriptions.is_empty() {
+                Some(
+                    tool_descriptions
+                        .into_iter()
+                        .map(|desc| AnthropicTool {
+                            name: desc.name,
+                            description: desc.description,
+                            input_schema: desc.parameters,
+                        })
+                        .collect()
+                )
+            } else {
+                None
+            }
+        } else {
+            debug!("No toolbox provided");
+            None
+        };
 
         // Create the request
         debug!("Creating AnthropicRequest");
@@ -288,7 +312,7 @@ impl AnthropicProvider {
             temperature: None,
             top_p: None,
             top_k: None,
-            tools: None, // We'll add tools support later
+            tools,
         };
 
         info!("Request payload created successfully");
@@ -465,11 +489,11 @@ impl From<&Message> for AnthropicMessage {
             MessageRole::User => "user",
             MessageRole::Assistant => "assistant",
             MessageRole::Function => "user", // Map function to user since Anthropic doesn't have function role
-            MessageRole::Tool => "user",     // Map tool to user for similar reasons
+            MessageRole::Tool => "user",     // We'll handle tool responses specially below
         }
         .to_string();
 
-        let content = match &msg.content {
+        let mut content = match &msg.content {
             Some(Content::Text(text)) => vec![AnthropicContentPart::text(text.clone())],
             Some(Content::Parts(parts)) => parts
                 .iter()
@@ -482,6 +506,18 @@ impl From<&Message> for AnthropicMessage {
                 .collect(),
             None => vec![AnthropicContentPart::text("".to_string())],
         };
+
+        // If this is a tool message, add a tool_result part
+        if msg.role == MessageRole::Tool && msg.tool_call_id.is_some() {
+            if let Some(Content::Text(text)) = &msg.content {
+                // We need to keep the first part if it exists, but replace any existing content with a tool_result
+                content = vec![AnthropicContentPart::ToolResult(AnthropicToolResponse {
+                    type_field: "tool_result".to_string(),
+                    tool_call_id: msg.tool_call_id.as_ref().unwrap().clone(),
+                    content: text.clone(),
+                })];
+            }
+        }
 
         AnthropicMessage { role, content }
     }
@@ -512,38 +548,59 @@ impl From<&AnthropicResponse> for Message {
             _ => MessageRole::User, // Default to user for unknown roles
         };
 
-        let content = if response.content.is_empty() {
-            None
-        } else if response.content.len() == 1 {
-            // If there's only one content part and it's text, use simple Text content
-            match &response.content[0] {
-                AnthropicResponseContent::Text { text } => Some(Content::Text(text.clone())),
-                _ => {
-                    // Otherwise, convert all parts
-                    let parts = response
-                        .content
-                        .iter()
-                        .map(|part| part.into())
-                        .collect::<Vec<ContentPart>>();
-                    Some(Content::Parts(parts))
+        // Extract text content and tool calls from response content
+        let mut text_content = Vec::new();
+        let mut tool_calls = Vec::new();
+
+        for content_part in &response.content {
+            match content_part {
+                AnthropicResponseContent::Text { text } => {
+                    text_content.push(ContentPart::text(text.clone()));
+                }
+                AnthropicResponseContent::ToolUse { id, name, input } => {
+                    // Convert tool use to our ToolCall format
+                    let function_call = crate::message::FunctionCall {
+                        name: name.clone(),
+                        arguments: serde_json::to_string(input).unwrap_or_default(),
+                    };
+
+                    let tool_call = crate::message::ToolCall {
+                        id: id.clone(),
+                        tool_type: "function".to_string(),
+                        function: function_call,
+                    };
+
+                    tool_calls.push(tool_call);
                 }
             }
+        }
+
+        // Create content based on what we found
+        let content = if text_content.is_empty() {
+            None
+        } else if text_content.len() == 1 {
+            match &text_content[0] {
+                ContentPart::Text { text } => Some(Content::Text(text.clone())),
+                _ => Some(Content::Parts(text_content)),
+            }
         } else {
-            // Multiple content parts
-            let parts = response
-                .content
-                .iter()
-                .map(|part| part.into())
-                .collect::<Vec<ContentPart>>();
-            Some(Content::Parts(parts))
+            Some(Content::Parts(text_content))
         };
 
+        // Create the tool_calls option
+        let tool_calls_option = if tool_calls.is_empty() {
+            None
+        } else {
+            Some(tool_calls)
+        };
+
+        // Create the base message
         let mut msg = Message {
             role,
             content,
             name: None,
             function_call: None,
-            tool_calls: None,
+            tool_calls: tool_calls_option,
             tool_call_id: None,
             metadata: Default::default(),
         };
@@ -617,6 +674,23 @@ mod tests {
             }
             _ => panic!("Expected image content"),
         }
+        
+        // Test tool message
+        let msg = Message::tool("tool_call_123", "The weather is sunny.");
+        let anthropic_msg = AnthropicMessage::from(&msg);
+        
+        assert_eq!(anthropic_msg.role, "user");
+        assert_eq!(anthropic_msg.content.len(), 1);
+        
+        // Verify tool content
+        match &anthropic_msg.content[0] {
+            AnthropicContentPart::ToolResult(tool_result) => {
+                assert_eq!(tool_result.type_field, "tool_result");
+                assert_eq!(tool_result.tool_call_id, "tool_call_123");
+                assert_eq!(tool_result.content, "The weather is sunny.");
+            }
+            _ => panic!("Expected tool result content"),
+        }
     }
 
     #[test]
@@ -677,16 +751,84 @@ mod tests {
         let msg = Message::from(&response);
 
         assert_eq!(msg.role, MessageRole::Assistant);
+        
+        // Verify content
         match &msg.content {
+            Some(Content::Text(text)) => {
+                assert_eq!(text, "Here's the information:");
+            }
             Some(Content::Parts(parts)) => {
-                assert_eq!(parts.len(), 2);
+                assert_eq!(parts.len(), 1);
                 match &parts[0] {
                     ContentPart::Text { text } => assert_eq!(text, "Here's the information:"),
                     _ => panic!("Expected text content"),
                 }
             }
-            _ => panic!("Expected parts content"),
+            _ => panic!("Expected text or parts content"),
         }
+        
+        // Verify tool calls
+        assert!(msg.tool_calls.is_some());
+        let tool_calls = msg.tool_calls.as_ref().unwrap();
+        assert_eq!(tool_calls.len(), 1);
+        
+        let tool_call = &tool_calls[0];
+        assert_eq!(tool_call.id, "tool_123");
+        assert_eq!(tool_call.tool_type, "function");
+        assert_eq!(tool_call.function.name, "get_weather");
+        
+        // Parse the arguments JSON to verify it
+        let arguments: serde_json::Value = serde_json::from_str(&tool_call.function.arguments).unwrap();
+        assert_eq!(arguments["location"], "San Francisco");
+    }
+    
+    #[test]
+    fn test_anthropic_response_with_tool_use_only() {
+        // Test response with only tool use (no text)
+        let response = AnthropicResponse {
+            id: "msg_123".to_string(),
+            type_field: "message".to_string(),
+            role: "assistant".to_string(),
+            model: "claude-3-opus-20240229".to_string(),
+            stop_reason: Some("end_turn".to_string()),
+            content: vec![
+                AnthropicResponseContent::ToolUse {
+                    id: "tool_xyz".to_string(),
+                    name: "calculate".to_string(),
+                    input: serde_json::json!({
+                        "expression": "2+2",
+                    }),
+                },
+            ],
+            usage: AnthropicUsage {
+                input_tokens: 5,
+                output_tokens: 10,
+            },
+        };
+
+        let msg = Message::from(&response);
+
+        assert_eq!(msg.role, MessageRole::Assistant);
+        
+        // Content should be None since there's no text
+        assert!(msg.content.is_none() || 
+               (match &msg.content {
+                   Some(Content::Parts(parts)) => parts.is_empty(),
+                   _ => false,
+               }));
+        
+        // Verify tool calls
+        assert!(msg.tool_calls.is_some());
+        let tool_calls = msg.tool_calls.as_ref().unwrap();
+        assert_eq!(tool_calls.len(), 1);
+        
+        let tool_call = &tool_calls[0];
+        assert_eq!(tool_call.id, "tool_xyz");
+        assert_eq!(tool_call.function.name, "calculate");
+        
+        // Parse the arguments JSON to verify it
+        let arguments: serde_json::Value = serde_json::from_str(&tool_call.function.arguments).unwrap();
+        assert_eq!(arguments["expression"], "2+2");
     }
 
     #[test]

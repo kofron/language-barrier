@@ -5,7 +5,10 @@ use language_barrier::provider::HTTPProvider;
 use language_barrier::provider::anthropic::{AnthropicConfig, AnthropicProvider};
 use language_barrier::provider::gemini::{GeminiConfig, GeminiProvider};
 use language_barrier::provider::openai::{OpenAIConfig, OpenAIProvider};
-use language_barrier::{Chat, Message};
+use language_barrier::{Chat, Message, Tool, ToolDescription, Toolbox};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::env;
 use tracing::{debug, info, warn, error, Level};
 use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
@@ -145,6 +148,298 @@ async fn test_anthropic_integration_with_executor() {
         response.metadata.get("output_tokens"));
     assert!(response.metadata.contains_key("input_tokens"));
     assert!(response.metadata.contains_key("output_tokens"));
+}
+
+// Define a simple test tool for weather
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+struct TestWeatherTool {
+    location: String,
+}
+
+impl Tool for TestWeatherTool {
+    fn name(&self) -> &str {
+        "get_weather"
+    }
+
+    fn description(&self) -> &str {
+        "Get weather information for a location"
+    }
+}
+
+// Simple toolbox implementation for testing
+struct TestToolbox;
+
+impl Toolbox for TestToolbox {
+    fn describe(&self) -> Vec<ToolDescription> {
+        // Create schema for TestWeatherTool
+        let weather_schema = schemars::schema_for!(TestWeatherTool);
+        let weather_schema_value = serde_json::to_value(weather_schema.schema).unwrap();
+
+        vec![
+            ToolDescription {
+                name: "get_weather".to_string(),
+                description: "Get weather information for a location".to_string(),
+                parameters: weather_schema_value,
+            },
+        ]
+    }
+
+    fn execute(&self, name: &str, arguments: Value) -> language_barrier::Result<String> {
+        match name {
+            "get_weather" => {
+                let request: TestWeatherTool = serde_json::from_value(arguments)?;
+                Ok(format!("Weather in {}: Sunny, 72°F", request.location))
+            }
+            _ => Err(language_barrier::Error::ToolNotFound(name.to_string())),
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_anthropic_tool_response_parsing() {
+    // Initialize tracing for this test
+    let subscriber = registry()
+        .with(fmt::layer().with_test_writer())
+        .with(EnvFilter::from_default_env().add_directive(Level::DEBUG.into()));
+    tracing::subscriber::set_global_default(subscriber).ok();
+    
+    info!("Starting test_anthropic_tool_response_parsing");
+    
+    // Create an Anthropic provider with default configuration
+    let provider = AnthropicProvider::new();
+
+    // Create a mock Anthropic response JSON with a tool call
+    let response_json = r#"{
+        "id": "msg_123abc",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-3-sonnet-20240229",
+        "stop_reason": "end_turn",
+        "content": [
+            {
+                "type": "text",
+                "text": "I'll check the weather for you."
+            },
+            {
+                "type": "tool_use",
+                "id": "tool_call_123",
+                "name": "get_weather",
+                "input": {
+                    "location": "San Francisco"
+                }
+            }
+        ],
+        "usage": {
+            "input_tokens": 25,
+            "output_tokens": 42
+        }
+    }"#;
+
+    // Parse the response using the provider
+    let message = provider.parse(response_json.to_string()).unwrap();
+    
+    // Verify it parsed correctly
+    assert_eq!(message.role, language_barrier::message::MessageRole::Assistant);
+    
+    // Check for text content
+    match &message.content {
+        Some(language_barrier::message::Content::Text(text)) => {
+            assert_eq!(text, "I'll check the weather for you.");
+        }
+        _ => {
+            // It could also be Content::Parts depending on implementation
+            match &message.content {
+                Some(language_barrier::message::Content::Parts(parts)) => {
+                    assert_eq!(parts.len(), 1);
+                    match &parts[0] {
+                        language_barrier::message::ContentPart::Text { text } => {
+                            assert_eq!(text, "I'll check the weather for you.");
+                        }
+                        _ => panic!("Expected text content part"),
+                    }
+                }
+                _ => panic!("Expected text or parts content"),
+            }
+        }
+    }
+    
+    // Verify tool calls are present
+    assert!(message.tool_calls.is_some());
+    let tool_calls = message.tool_calls.unwrap();
+    assert_eq!(tool_calls.len(), 1);
+    
+    // Check first tool call
+    let tool_call = &tool_calls[0];
+    assert_eq!(tool_call.id, "tool_call_123");
+    assert_eq!(tool_call.function.name, "get_weather");
+    
+    // Parse arguments to verify
+    let args: serde_json::Value = serde_json::from_str(&tool_call.function.arguments).unwrap();
+    assert_eq!(args["location"], "San Francisco");
+    
+    // Verify token usage metadata is present
+    assert_eq!(message.metadata["input_tokens"], 25);
+    assert_eq!(message.metadata["output_tokens"], 42);
+}
+
+#[tokio::test]
+async fn test_anthropic_tool_result_conversion() {
+    // Initialize tracing for this test
+    let subscriber = registry()
+        .with(fmt::layer().with_test_writer())
+        .with(EnvFilter::from_default_env().add_directive(Level::DEBUG.into()));
+    tracing::subscriber::set_global_default(subscriber).ok();
+    
+    info!("Starting test_anthropic_tool_result_conversion");
+    
+    // Create a provider to use
+    let provider = AnthropicProvider::new();
+    
+    // Create a sequence with a tool message
+    let mut chat = Chat::new(Claude::Haiku3)
+        .with_system_prompt("You are a helpful assistant.");
+    
+    // Add an assistant message with a tool call
+    let mut assistant_message = Message::assistant("I'll check the weather for you.");
+    
+    // Create a tool call
+    let tool_call = language_barrier::message::ToolCall {
+        id: "call_123".to_string(),
+        tool_type: "function".to_string(),
+        function: language_barrier::message::FunctionCall {
+            name: "get_weather".to_string(),
+            arguments: r#"{"location":"San Francisco"}"#.to_string(),
+        },
+    };
+    
+    // Add the tool call to the assistant message
+    assistant_message.tool_calls = Some(vec![tool_call]);
+    chat.add_message(assistant_message);
+    
+    // Add a tool response
+    let tool_message = Message::tool("call_123", "Weather in San Francisco: Sunny, 72°F");
+    chat.add_message(tool_message);
+    
+    // Create a request using the provider
+    let request = provider.accept(chat).unwrap();
+    
+    // Get the request body as a string
+    let body_bytes = request.body().unwrap().as_bytes().unwrap();
+    let body_str = std::str::from_utf8(body_bytes).unwrap();
+    
+    // Verify the request contains tool_result with the right content
+    assert!(body_str.contains("\"tool_result\""));
+    assert!(body_str.contains("\"tool_call_id\":\"call_123\""));
+    assert!(body_str.contains("Weather in San Francisco: Sunny, 72°F"));
+}
+
+#[tokio::test]
+async fn test_anthropic_tools_request_creation() {
+    // Initialize tracing for this test
+    let subscriber = registry()
+        .with(fmt::layer().with_test_writer())
+        .with(EnvFilter::from_default_env().add_directive(Level::DEBUG.into()));
+    tracing::subscriber::set_global_default(subscriber).ok();
+    
+    info!("Starting test_anthropic_tools_request_creation");
+    
+    // Create an Anthropic provider with default configuration
+    let provider = AnthropicProvider::new();
+
+    // Create a chat with a simple message and tools
+    let model = Claude::Sonnet35 {
+        version: Sonnet35Version::V2,
+    };
+    let mut chat = Chat::new(model)
+        .with_system_prompt("You are a helpful AI assistant.")
+        .with_max_output_tokens(1000)
+        .with_toolbox(TestToolbox);
+
+    // Add a user message
+    chat.add_message(Message::user("What's the weather in San Francisco?"));
+
+    // Create a request using the provider
+    let request = provider.accept(chat).unwrap();
+
+    // Get the request body as a string
+    let body_bytes = request.body().unwrap().as_bytes().unwrap();
+    let body_str = std::str::from_utf8(body_bytes).unwrap();
+    
+    // Check that the request includes tools
+    assert!(body_str.contains("\"tools\""));
+    assert!(body_str.contains("\"get_weather\""));
+    assert!(body_str.contains("\"location\""));
+    
+    // Verify request properties
+    assert_eq!(request.method(), "POST");
+    assert_eq!(
+        request.url().as_str(),
+        "https://api.anthropic.com/v1/messages"
+    );
+    assert!(request.headers().contains_key("x-api-key"));
+    assert!(request.headers().contains_key("anthropic-version"));
+    assert_eq!(
+        request.headers().get("Content-Type").unwrap(),
+        "application/json"
+    );
+}
+
+#[tokio::test]
+async fn test_chat_process_tool_calls() {
+    // Initialize tracing for this test
+    let subscriber = registry()
+        .with(fmt::layer().with_test_writer())
+        .with(EnvFilter::from_default_env().add_directive(Level::DEBUG.into()));
+    tracing::subscriber::set_global_default(subscriber).ok();
+    
+    info!("Starting test_chat_process_tool_calls");
+    
+    // Create a chat with toolbox
+    let mut chat = Chat::new(Claude::Haiku3)
+        .with_system_prompt("You are a helpful assistant.")
+        .with_toolbox(TestToolbox);
+    
+    // Add a user message
+    chat.add_message(Message::user("What's the weather in San Francisco?"));
+    
+    // Create an assistant message with a tool call
+    let mut assistant_message = Message::assistant("I'll check the weather for you.");
+    
+    // Create a tool call
+    let tool_call = language_barrier::message::ToolCall {
+        id: "call_123".to_string(),
+        tool_type: "function".to_string(),
+        function: language_barrier::message::FunctionCall {
+            name: "get_weather".to_string(),
+            arguments: r#"{"location":"San Francisco"}"#.to_string(),
+        },
+    };
+    
+    // Add the tool call to the assistant message
+    assistant_message.tool_calls = Some(vec![tool_call]);
+    
+    // Add the assistant message to chat
+    chat.add_message(assistant_message.clone());
+    
+    // Process the tool calls
+    chat.process_tool_calls(&assistant_message).unwrap();
+    
+    // Verify that a tool message was added
+    assert_eq!(chat.history.len(), 3); // User, Assistant, Tool
+    
+    // Check the tool message
+    let tool_message = &chat.history[2];
+    assert_eq!(tool_message.role, language_barrier::message::MessageRole::Tool);
+    assert_eq!(tool_message.tool_call_id.as_ref().unwrap(), "call_123");
+    
+    // Verify the tool message content
+    match &tool_message.content {
+        Some(language_barrier::message::Content::Text(text)) => {
+            assert!(text.contains("Weather in San Francisco"));
+            assert!(text.contains("Sunny"));
+        }
+        _ => panic!("Expected text content"),
+    }
 }
 
 #[tokio::test]
