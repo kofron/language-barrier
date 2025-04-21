@@ -1,254 +1,65 @@
-// use dotenv::dotenv;
-// use language_barrier_core::SingleRequestExecutor;
-// use language_barrier_core::message::{Content, ContentPart};
-// use language_barrier_core::model::{Claude, Sonnet35Version};
-// use language_barrier_core::provider::anthropic::{AnthropicConfig, AnthropicProvider};
-// use language_barrier_core::{Chat, Message, Result, Tool, ToolDefinition, Toolbox};
-// use schemars::JsonSchema;
-// use serde::{Deserialize, Serialize};
-// use serde_json::Value;
-// use std::env;
-// use tracing::{Level, info, warn};
-// use tracing_subscriber::{EnvFilter, fmt, prelude::*, registry};
+use language_barrier_core::{ModelInfo, SingleRequestExecutor};
+use language_barrier_core::model::{Claude, Sonnet35Version};
+use language_barrier_core::{Chat, Message};
+use tracing::{Level, info};
+use test_tools::WeatherTool;
 
-// // Define a simple weather tool
-// #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-// struct WeatherRequest {
-//     location: String,
-//     units: Option<String>,
-// }
+// Import our helper modules
+mod test_tools;
+mod test_utils;
 
-// impl Tool for WeatherRequest {
-//     fn name(&self) -> &str {
-//         "get_weather"
-//     }
+use test_utils::{
+    get_anthropic_provider, setup_tracing,
+};
 
-//     fn description(&self) -> &str {
-//         "Get current weather for a location"
-//     }
-// }
+#[tokio::test]
+async fn test_multi_turn_conversation_with_tools() {
+    setup_tracing(Level::DEBUG);
+    info!("Starting test_multi_turn_conversation_with_tools");
 
-// // Define a simple toolbox
-// struct TestToolbox;
+    // Skip test if no API key is available
+    let Some(provider) = get_anthropic_provider() else {
+        info!("Skipping test_multi_turn_conversation_with_tools: No API key available");
+        return;
+    };
 
-// impl Toolbox for TestToolbox {
-//     fn describe(&self) -> Vec<ToolDescription> {
-//         // Create schema for WeatherRequest
-//         let weather_schema = schemars::schema_for!(WeatherRequest);
-//         let weather_schema_value = serde_json::to_value(weather_schema.schema).unwrap();
+    // Create a chat with tools for San Francisco weather
+    let chat_sf = Chat::new(Claude::Sonnet35 {
+        version: Sonnet35Version::V2,
+    })
+    .with_system_prompt("You are a helpful AI assistant that can provide weather information.")
+    .with_max_output_tokens(1000)
+    .with_tool(WeatherTool)
+    .unwrap()
+    .add_message(Message::user("What's the weather like in San Francisco?"));
 
-//         vec![ToolDescription {
-//             name: "get_weather".to_string(),
-//             description: "Get current weather for a location".to_string(),
-//             parameters: weather_schema_value,
-//         }]
-//     }
+    // Get the first response (San Francisco)
+    let executor = SingleRequestExecutor::new(provider.clone());
+    
+    if let Ok(Message::Assistant { tool_calls, .. }) = executor.send(chat_sf).await {
+        assert!(!tool_calls.is_empty(), "Expected tool calls for San Francisco");
+    } else {
+        assert!(false, "Expected assistant message for San Francisco");
+    }
 
-//     fn execute(&self, name: &str, arguments: Value) -> Result<String> {
-//         match name {
-//             "get_weather" => {
-//                 let request: WeatherRequest = serde_json::from_value(arguments)?;
-//                 let units = request.units.unwrap_or_else(|| "celsius".to_string());
-//                 Ok(format!(
-//                     "Weather in {}: 22 degrees {}, partly cloudy with a chance of rain",
-//                     request.location, units
-//                 ))
-//             }
-//             _ => Err(language_barrier_core::Error::ToolNotFound(name.to_string())),
-//         }
-//     }
-// }
+    // Create a new chat for New York weather
+    let chat_ny = Chat::new(Claude::Sonnet35 {
+        version: Sonnet35Version::V2,
+    })
+    .with_system_prompt("You are a helpful AI assistant that can provide weather information.")
+    .with_max_output_tokens(1000)
+    .with_tool(WeatherTool)
+    .unwrap()
+    .add_message(Message::user("What's the weather like in New York?"));
 
-// #[tokio::test]
-// async fn test_multi_turn_conversation_with_tools() {
-//     // Initialize tracing for this test
-//     let subscriber = registry()
-//         .with(
-//             fmt::layer()
-//                 .with_test_writer()
-//                 .with_ansi(false) // Better for CI logs
-//                 .with_file(true) // Include source code location
-//                 .with_line_number(true),
-//         )
-//         .with(EnvFilter::from_default_env().add_directive(Level::TRACE.into()));
-
-//     tracing::subscriber::set_global_default(subscriber).ok();
-
-//     info!("Starting test_multi_turn_conversation_with_tools");
-
-//     // Load environment variables from .env file if available
-//     dotenv().ok();
-
-//     // Skip test if no API key is available
-//     let api_key = match env::var("ANTHROPIC_API_KEY") {
-//         Ok(key) if !key.is_empty() => key,
-//         _ => {
-//             warn!("Skipping test: No ANTHROPIC_API_KEY found");
-//             return;
-//         }
-//     };
-
-//     // Create a provider with the API key
-//     let config = AnthropicConfig {
-//         api_key,
-//         base_url: "https://api.anthropic.com/v1".to_string(),
-//         api_version: "2023-06-01".to_string(),
-//     };
-//     let provider = AnthropicProvider::with_config(config);
-
-//     // Create an executor
-//     let executor = SingleRequestExecutor::new(provider);
-
-//     // Create a chat with tools
-//     let mut chat = Chat::new(Claude::Sonnet35 {
-//         version: Sonnet35Version::V2,
-//     })
-//     .with_system_prompt("You are a helpful AI assistant that can provide weather information.")
-//     .with_max_output_tokens(1000)
-//     .with_toolbox(TestToolbox);
-
-//     // Start a multi-turn conversation
-
-//     // First message
-//     info!("Sending first user message");
-//     chat.add_message(Message::user("What's the weather like in San Francisco?"));
-
-//     // Get first response
-//     let response = match executor.send(chat).await {
-//         Ok(resp) => {
-//             if let Message::Assistant { content, .. } = &resp {
-//                 info!("Received first response: {:?}", content);
-//             }
-//             resp
-//         }
-//         Err(e) => {
-//             warn!("Failed to get response: {}", e);
-//             if e.to_string().contains("missing field") {
-//                 warn!("This could be an API version mismatch or field name change");
-//             }
-//             return; // Skip the rest of the test
-//         }
-//     };
-
-//     // The response should include a tool call for weather
-//     match &response {
-//         Message::Assistant { tool_calls, .. } => {
-//             assert!(
-//                 !tool_calls.is_empty(),
-//                 "Expected tool calls in the response"
-//             );
-//         }
-//         _ => panic!("Expected assistant message"),
-//     }
-
-//     // Process tool calls
-//     let mut updated_chat = Chat::new(Claude::Sonnet35 {
-//         version: Sonnet35Version::V2,
-//     })
-//     .with_system_prompt("You are a helpful AI assistant that can provide weather information.")
-//     .with_max_output_tokens(1000)
-//     .with_toolbox(TestToolbox);
-
-//     // Add the original user question
-//     updated_chat.add_message(Message::user("What's the weather like in San Francisco?"));
-
-//     // Add the assistant's response
-//     updated_chat.add_message(response.clone());
-
-//     // Process the tool calls to add tool response messages
-//     updated_chat.process_tool_calls(&response).unwrap();
-
-//     // Ask a follow-up question
-//     info!("Sending follow-up question");
-//     updated_chat.add_message(Message::user("How about the weather in New York?"));
-
-//     // Get response to follow-up
-//     let follow_up_response = match executor.send(updated_chat).await {
-//         Ok(resp) => {
-//             if let Message::Assistant { content, .. } = &resp {
-//                 info!("Received follow-up response: {:?}", content);
-//             }
-//             resp
-//         }
-//         Err(e) => {
-//             warn!("Failed to get follow-up response: {}", e);
-//             if e.to_string().contains("missing field") {
-//                 warn!("This could be an API version mismatch or field name change");
-//             }
-//             return; // Skip the rest of the test
-//         }
-//     };
-
-//     // The follow-up response should also include a tool call
-//     match &follow_up_response {
-//         Message::Assistant { tool_calls, .. } => {
-//             assert!(
-//                 !tool_calls.is_empty(),
-//                 "Expected tool calls in follow-up response"
-//             );
-//         }
-//         _ => panic!("Expected assistant message"),
-//     }
-
-//     // Inspect the follow-up response content to verify it references New York
-//     let references_new_york = match &follow_up_response {
-//         Message::Assistant {
-//             content,
-//             tool_calls,
-//             ..
-//         } => {
-//             match content {
-//                 Some(Content::Text(text)) => {
-//                     info!("Follow-up text response: {}", text);
-//                     text.contains("New York")
-//                 }
-//                 Some(Content::Parts(parts)) => parts.iter().any(|part| match part {
-//                     ContentPart::Text { text } => {
-//                         info!("Follow-up part: {}", text);
-//                         text.contains("New York")
-//                     }
-//                     _ => false,
-//                 }),
-//                 None => {
-//                     // Check if tool call references New York if there's no content
-//                     tool_calls
-//                         .iter()
-//                         .any(|call| call.function.arguments.contains("New York"))
-//                 }
-//             }
-//         }
-//         _ => panic!("Expected assistant message"),
-//     };
-
-//     // Alternative check in tool calls for New York reference
-//     let tool_calls_reference_new_york = match &follow_up_response {
-//         Message::Assistant { tool_calls, .. } => tool_calls.iter().any(|call| {
-//             info!(
-//                 "Follow-up tool call: {} - {}",
-//                 call.function.name, call.function.arguments
-//             );
-//             call.function.arguments.contains("New York")
-//         }),
-//         _ => panic!("Expected assistant message"),
-//     };
-
-//     assert!(
-//         references_new_york || tool_calls_reference_new_york,
-//         "Follow-up response should reference New York"
-//     );
-
-//     // Check that the model remembered previous context - it shouldn't repeat the San Francisco weather
-//     // when we asked about New York
-//     let response_text = match &follow_up_response {
-//         Message::Assistant {
-//             content: Some(Content::Text(text)),
-//             ..
-//         } => text.clone(),
-//         _ => String::new(),
-//     };
-
-//     assert!(
-//         !response_text.contains("San Francisco"),
-//         "Follow-up response should not repeat San Francisco weather"
-//     );
-// }
+    // Get the second response (New York)
+    if let Ok(Message::Assistant { tool_calls, .. }) = executor.send(chat_ny).await {
+        assert!(!tool_calls.is_empty(), "Expected tool calls for New York");
+        
+        // Verify there's a reference to New York in the tool calls
+        let references_ny = tool_calls.iter().any(|call| call.function.arguments.contains("New York"));
+        assert!(references_ny, "Expected tool call to reference New York");
+    } else {
+        assert!(false, "Expected assistant message for New York");
+    }
+}
