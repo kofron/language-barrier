@@ -2,7 +2,7 @@ use crate::ModelInfo;
 use crate::compactor::{ChatHistoryCompactor, DropOldestCompactor};
 use crate::message::{Content, Message};
 use crate::token::TokenCounter;
-use crate::tool::{Toolbox, ToolDescription};
+use crate::tool::{Toolbox, ToolDescription, ToolRegistry, LlmToolInfo, ToolRegistryAdapter, ToolEntry};
 
 /// The main Chat client that users will interact with
 pub struct Chat<M: ModelInfo> {
@@ -20,6 +20,9 @@ pub struct Chat<M: ModelInfo> {
     
     // Optional toolbox for function/tool calling
     toolbox: Option<Box<dyn Toolbox>>,
+    
+    // New registry for type-safe tool definitions (optional)
+    tool_registry: Option<ToolRegistry>,
 }
 
 impl<M> Chat<M>
@@ -36,6 +39,7 @@ where
             token_counter: TokenCounter::default(),
             compactor: Box::<DropOldestCompactor>::default(),
             toolbox: None,
+            tool_registry: None,
         }
     }
 
@@ -228,5 +232,61 @@ where
     /// Returns true if the chat has a toolbox configured
     pub fn has_toolbox(&self) -> bool {
         self.toolbox.is_some()
+    }
+    
+    /// Sets a tool registry for this chat
+    #[must_use]
+    pub fn with_tool_registry(mut self, registry: ToolRegistry) -> Self {
+        self.tool_registry = Some(registry);
+        self
+    }
+    
+    /// Sets a tool registry at runtime
+    pub fn set_tool_registry(&mut self, registry: ToolRegistry) {
+        self.tool_registry = Some(registry);
+    }
+    
+    /// Gets the tool descriptions from the new registry
+    pub fn registry_tool_descriptions(&self) -> Vec<LlmToolInfo> {
+        match &self.tool_registry {
+            Some(registry) => registry.get_tool_descriptions(),
+            None => Vec::new(),
+        }
+    }
+    
+    /// Creates a ToolRegistryAdapter from the current registry and sets it as the toolbox
+    pub fn use_registry_as_toolbox(&mut self) -> crate::error::Result<()> {
+        if let Some(registry) = &self.tool_registry {
+            let adapter = ToolRegistryAdapter::new(registry.clone());
+            self.toolbox = Some(Box::new(adapter));
+            Ok(())
+        } else {
+            Err(crate::Error::Other("No tool registry is configured".to_string()))
+        }
+    }
+    
+    /// Returns true if the chat has a tool registry configured
+    pub fn has_tool_registry(&self) -> bool {
+        self.tool_registry.is_some()
+    }
+}
+
+// ToolRegistry needs to be clonable to support adapter creation
+impl Clone for ToolRegistry {
+    fn clone(&self) -> Self {
+        // Create a new registry with the same tools
+        let mut registry = ToolRegistry::new();
+        
+        // Copy the tool entries
+        for (name, entry) in &self.tools {
+            let cloned_entry = ToolEntry {
+                name: entry.name.clone(),
+                description: entry.description.clone(),
+                schema: entry.schema.clone(),
+            };
+            registry.tools.insert(name.clone(), cloned_entry);
+        }
+        
+        registry
     }
 }

@@ -21,4 +21,8 @@ pub use message::{Content, Message, ToolCall};
 pub use model::{Claude, GPT, Gemini, Mistral, ModelInfo};
 pub use secret::Secret;
 pub use token::TokenCounter;
-pub use tool::{Tool, ToolCallView, ToolDescription, Toolbox, TypedToolbox};
+pub use tool::{
+    Tool, ToolCallView, ToolDescription, Toolbox, TypedToolbox,
+    // New tool system exports
+    ToolDefinition, ToolRegistry, LlmToolInfo, ToolError, ToolRegistryAdapter
+};

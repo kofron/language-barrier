@@ -1,7 +1,8 @@
 use schemars::JsonSchema;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
-use std::marker::PhantomData;
+use std::{collections::HashMap, marker::PhantomData};
+use thiserror::Error;
 
 use crate::error::Result;
 use crate::message::{Message, ToolCall};
@@ -277,6 +278,228 @@ pub trait TypedToolbox<T: DeserializeOwned>: Toolbox {
     ///
     /// Returns an error if execution fails.
     fn execute_typed(&self, request: T) -> Result<String>;
+}
+
+/// Errors that can occur when working with tools
+#[derive(Error, Debug)]
+pub enum ToolError {
+    /// Tool with the specified name was not found in the registry
+    #[error("Tool not found: {0}")]
+    NotFound(String),
+
+    /// Error generating JSON schema for tool
+    #[error("Failed to generate schema for tool '{0}': {1}")]
+    SchemaGenerationError(String, serde_json::Error),
+
+    /// Error parsing arguments for tool
+    #[error("Failed to parse arguments for tool '{0}': {1}")]
+    ArgumentParsingError(String, serde_json::Error),
+
+    /// Tool execution encountered an error
+    #[error("Tool execution failed for tool '{0}': {1}")]
+    ExecutionError(String, Box<dyn std::error::Error + Send + Sync>),
+
+    /// Expected output type did not match actual output type
+    #[error("Type mismatch after execution for tool '{0}': Expected different output type")]
+    OutputTypeMismatch(String),
+}
+
+/// Core trait for defining tools with associated input and output types
+///
+/// This trait provides a more flexible and type-safe way to define tools compared
+/// to the original `Tool` trait. It uses associated types to specify the input and output
+/// types for a tool, allowing for better compile-time type checking.
+///
+/// # Type Parameters
+///
+/// * `Input` - The type of input that this tool accepts, must implement `DeserializeOwned` and `JsonSchema`
+/// * `Output` - The type of output that this tool produces, must implement `Serialize`
+///
+/// # Examples
+///
+/// ```
+/// use language_barrier_core::ToolDefinition;
+/// use schemars::JsonSchema;
+/// use serde::{Deserialize, Serialize};
+///
+/// #[derive(Debug, Clone, Deserialize, JsonSchema)]
+/// struct WeatherRequest {
+///     location: String,
+///     units: Option<String>,
+/// }
+///
+/// #[derive(Debug, Clone, Serialize)]
+/// struct WeatherResponse {
+///     temperature: f64,
+///     condition: String,
+///     location: String,
+///     units: String,
+/// }
+///
+/// struct WeatherTool;
+///
+/// impl ToolDefinition for WeatherTool {
+///     type Input = WeatherRequest;
+///     type Output = WeatherResponse;
+///
+///     fn name(&self) -> String {
+///         "get_weather".to_string()
+///     }
+///
+///     fn description(&self) -> String {
+///         "Get current weather for a location".to_string()
+///     }
+/// }
+/// ```
+pub trait ToolDefinition {
+    /// The input type that this tool accepts
+    type Input: DeserializeOwned + JsonSchema + Send + Sync + 'static;
+
+    /// The output type that this tool produces
+    type Output: Serialize + Send + Sync + 'static;
+
+    /// Returns the name of the tool
+    fn name(&self) -> String;
+
+    /// Returns the description of the tool
+    fn description(&self) -> String;
+
+    /// Helper to generate the JSON schema for the input type
+    fn schema(&self) -> Result<Value> {
+        let schema = schemars::schema_for!(Self::Input);
+        serde_json::to_value(schema.schema)
+            .map_err(|e| crate::Error::Other(format!("Schema generation failed: {}", e)))
+    }
+}
+
+/// LLM-facing representation of a tool
+#[derive(Serialize, Debug, Clone)]
+pub struct LlmToolInfo {
+    pub name: String,
+    pub description: String,
+    pub parameters: Value,
+}
+
+/// Registry for storing tool definitions
+pub struct ToolRegistry {
+    pub(crate) tools: HashMap<String, ToolEntry>,
+}
+
+/// Internal structure to store a registered tool
+pub(crate) struct ToolEntry {
+    pub name: String,
+    pub description: String,
+    pub schema: Value,
+}
+
+impl ToolRegistry {
+    /// Creates a new, empty tool registry
+    pub fn new() -> Self {
+        ToolRegistry {
+            tools: HashMap::new(),
+        }
+    }
+
+    /// Registers a tool with the registry
+    pub fn register_tool<T>(&mut self, tool: T) -> Result<()>
+    where
+        T: ToolDefinition + Send + Sync + 'static,
+    {
+        let name = tool.name();
+        let description = tool.description();
+        let schema = tool.schema()?;
+
+        let entry = ToolEntry {
+            name: name.clone(),
+            description,
+            schema,
+        };
+
+        self.tools.insert(name, entry);
+        Ok(())
+    }
+
+    /// Gets LLM-friendly descriptions of all registered tools
+    pub fn get_tool_descriptions(&self) -> Vec<LlmToolInfo> {
+        self.tools
+            .values()
+            .map(|entry| LlmToolInfo {
+                name: entry.name.clone(),
+                description: entry.description.clone(),
+                parameters: entry.schema.clone(),
+            })
+            .collect()
+    }
+
+    /// Returns true if the registry has a tool with the given name
+    pub fn has_tool(&self, name: &str) -> bool {
+        self.tools.contains_key(name)
+    }
+
+    /// Returns the number of registered tools
+    pub fn len(&self) -> usize {
+        self.tools.len()
+    }
+
+    /// Returns true if the registry has no registered tools
+    pub fn is_empty(&self) -> bool {
+        self.tools.is_empty()
+    }
+}
+
+impl Default for ToolRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Legacy wrapper for toolbox implementation over ToolRegistry
+pub struct ToolRegistryAdapter {
+    registry: ToolRegistry,
+    // Maps for tools that have been registered with execution functions
+    // This is temporary until we fully migrate to the runtime executor
+    executors:
+        HashMap<String, Box<dyn Fn(Value) -> std::result::Result<String, ToolError> + Send + Sync>>,
+}
+
+impl ToolRegistryAdapter {
+    pub fn new(registry: ToolRegistry) -> Self {
+        ToolRegistryAdapter {
+            registry,
+            executors: HashMap::new(),
+        }
+    }
+
+    /// Registers an executor function for a tool name
+    pub fn register_executor(
+        &mut self,
+        name: &str,
+        executor: impl Fn(Value) -> std::result::Result<String, ToolError> + Send + Sync + 'static,
+    ) {
+        self.executors.insert(name.to_string(), Box::new(executor));
+    }
+}
+
+impl Toolbox for ToolRegistryAdapter {
+    fn describe(&self) -> Vec<ToolDescription> {
+        self.registry
+            .get_tool_descriptions()
+            .into_iter()
+            .map(|info| ToolDescription {
+                name: info.name,
+                description: info.description,
+                parameters: info.parameters,
+            })
+            .collect()
+    }
+
+    fn execute(&self, name: &str, arguments: Value) -> Result<String> {
+        match self.executors.get(name) {
+            Some(executor) => executor(arguments)
+                .map_err(|e| crate::Error::ToolExecutionError(format!("{}: {}", name, e))),
+            None => Err(crate::Error::ToolNotFound(name.to_string())),
+        }
+    }
 }
 
 /// A view over a message that provides typed access to tool calls
