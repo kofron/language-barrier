@@ -1,92 +1,63 @@
-use language_barrier_core::{Result, Tool, ToolDescription, Toolbox};
+use language_barrier_core::{Result, ToolDefinition};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 // ===== Weather Tool =====
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct WeatherRequest {
     pub location: String,
     pub units: Option<String>,
 }
 
-impl Tool for WeatherRequest {
-    fn name(&self) -> &str {
-        "get_weather"
+#[derive(Debug, Clone, Serialize)]
+pub struct WeatherResponse {
+    pub temperature: i32,
+    pub conditions: String,
+    pub location: String,
+    pub units: String,
+}
+
+pub struct WeatherTool;
+
+impl ToolDefinition for WeatherTool {
+    type Input = WeatherRequest;
+    type Output = WeatherResponse;
+
+    fn name(&self) -> String {
+        "get_weather".to_string()
     }
 
-    fn description(&self) -> &str {
-        "Get current weather for a location"
+    fn description(&self) -> String {
+        "Get current weather for a location".to_string()
     }
 }
 
 // ===== Calculator Tool =====
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct CalculatorRequest {
     pub expression: String,
 }
 
-impl Tool for CalculatorRequest {
-    fn name(&self) -> &str {
-        "calculate"
-    }
-
-    fn description(&self) -> &str {
-        "Calculate the result of a mathematical expression"
-    }
+#[derive(Debug, Clone, Serialize)]
+pub struct CalculatorResponse {
+    pub result: f64,
+    pub expression: String,
 }
 
-// ===== Common Toolbox Implementation =====
+pub struct CalculatorTool;
 
-pub struct TestToolbox;
+impl ToolDefinition for CalculatorTool {
+    type Input = CalculatorRequest;
+    type Output = CalculatorResponse;
 
-impl Toolbox for TestToolbox {
-    fn describe(&self) -> Vec<ToolDescription> {
-        // Create schema for WeatherRequest
-        let weather_schema = schemars::schema_for!(WeatherRequest);
-        let weather_schema_value = serde_json::to_value(weather_schema.schema).unwrap();
-
-        // Create schema for CalculatorRequest
-        let calculator_schema = schemars::schema_for!(CalculatorRequest);
-        let calculator_schema_value = serde_json::to_value(calculator_schema.schema).unwrap();
-
-        vec![
-            ToolDescription {
-                name: "get_weather".to_string(),
-                description: "Get current weather for a location".to_string(),
-                parameters: weather_schema_value,
-            },
-            ToolDescription {
-                name: "calculate".to_string(),
-                description: "Calculate the result of a mathematical expression".to_string(),
-                parameters: calculator_schema_value,
-            },
-        ]
+    fn name(&self) -> String {
+        "calculate".to_string()
     }
 
-    fn execute(&self, name: &str, arguments: Value) -> Result<String> {
-        match name {
-            "get_weather" => {
-                let request: WeatherRequest = serde_json::from_value(arguments)?;
-                let units = request.units.unwrap_or_else(|| "celsius".to_string());
-                Ok(format!(
-                    "Weather in {}: 22 degrees {}, partly cloudy with a chance of rain",
-                    request.location, units
-                ))
-            }
-            "calculate" => {
-                let request: CalculatorRequest = serde_json::from_value(arguments)?;
-                // Simple calculator that supports basic operations
-                let result = match simple_eval(&request.expression) {
-                    Ok(value) => format!("The result of {} is {}", request.expression, value),
-                    Err(err) => format!("Error calculating {}: {}", request.expression, err),
-                };
-                Ok(result)
-            }
-            _ => Err(language_barrier_core::Error::ToolNotFound(name.to_string())),
-        }
+    fn description(&self) -> String {
+        "Calculate the result of a mathematical expression".to_string()
     }
 }
 
@@ -136,37 +107,5 @@ fn simple_eval(expr: &str) -> Result<f64> {
             "Invalid expression: {}",
             expr
         ))),
-    }
-}
-
-// ===== Weather-only Toolbox =====
-
-pub struct WeatherToolbox;
-
-impl Toolbox for WeatherToolbox {
-    fn describe(&self) -> Vec<ToolDescription> {
-        // Create schema for WeatherRequest
-        let weather_schema = schemars::schema_for!(WeatherRequest);
-        let weather_schema_value = serde_json::to_value(weather_schema.schema).unwrap();
-
-        vec![ToolDescription {
-            name: "get_weather".to_string(),
-            description: "Get current weather for a location".to_string(),
-            parameters: weather_schema_value,
-        }]
-    }
-
-    fn execute(&self, name: &str, arguments: Value) -> Result<String> {
-        match name {
-            "get_weather" => {
-                let request: WeatherRequest = serde_json::from_value(arguments)?;
-                let units = request.units.unwrap_or_else(|| "celsius".to_string());
-                Ok(format!(
-                    "Weather in {}: 22 degrees {}, partly cloudy with a chance of rain",
-                    request.location, units
-                ))
-            }
-            _ => Err(language_barrier_core::Error::ToolNotFound(name.to_string())),
-        }
     }
 }

@@ -2,7 +2,7 @@ use crate::error::{Error, Result};
 use crate::message::{Content, ContentPart, Message};
 use crate::model::Sonnet35Version;
 use crate::provider::HTTPProvider;
-use crate::{Chat, Claude};
+use crate::{Chat, Claude, LlmToolInfo};
 use reqwest::{Method, Request, Url};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -304,32 +304,11 @@ impl AnthropicProvider {
         let model_id = Self::id_for_model(chat.model).to_string();
         debug!("Using model ID: {}", model_id);
 
-        // Convert tool descriptions if a toolbox is provided
-        let tools = if chat.has_toolbox() {
-            let tool_descriptions = chat.tool_descriptions();
-            debug!(
-                "Converting {} tool descriptions to Anthropic format",
-                tool_descriptions.len()
-            );
-
-            if tool_descriptions.is_empty() {
-                None
-            } else {
-                Some(
-                    tool_descriptions
-                        .into_iter()
-                        .map(|desc| AnthropicTool {
-                            name: desc.name,
-                            description: desc.description,
-                            input_schema: desc.parameters,
-                        })
-                        .collect(),
-                )
-            }
-        } else {
-            debug!("No toolbox provided");
-            None
-        };
+        // Convert tool descriptions if a tool registry is provided
+        let tools = chat
+            .tools
+            .as_ref()
+            .map(|tools| tools.iter().map(AnthropicTool::from).collect());
 
         // Create the request
         debug!("Creating AnthropicRequest");
@@ -669,6 +648,16 @@ impl From<&AnthropicResponse> for Message {
     }
 }
 
+impl From<&LlmToolInfo> for AnthropicTool {
+    fn from(value: &LlmToolInfo) -> Self {
+        AnthropicTool {
+            name: value.name.clone(),
+            description: value.description.clone(),
+            input_schema: value.parameters.clone(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -989,14 +978,12 @@ mod tests {
         let model = Claude::Sonnet37 {
             use_extended_thinking: false,
         };
-        let mut chat = Chat::new(model)
+        let chat = Chat::new(model)
             .with_system_prompt("You are a helpful assistant.")
-            .with_max_output_tokens(1024);
-
-        // Add some messages
-        chat.push_message(Message::user("Hello, how are you?"));
-        chat.push_message(Message::assistant("I'm doing well, thank you for asking!"));
-        chat.push_message(Message::user("Can you help me with a question?"));
+            .with_max_output_tokens(1024)
+            .add_message(Message::user("Hello, how are you?"))
+            .add_message(Message::assistant("I'm doing well, thank you for asking!"))
+            .add_message(Message::user("Can you help me with a question?"));
 
         // Create the request
         let request = provider.accept(chat).unwrap();

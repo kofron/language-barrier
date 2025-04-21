@@ -1,7 +1,7 @@
 use crate::error::{Error, Result};
 use crate::message::{Content, ContentPart, Message};
 use crate::provider::HTTPProvider;
-use crate::{Chat, ModelInfo};
+use crate::{Chat, LlmToolInfo, ModelInfo};
 use reqwest::{Method, Request, Url};
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -269,34 +269,10 @@ impl MistralProvider {
         debug!("Converted {} messages for the request", messages.len());
 
         // Add tools if present
-        let tools = if chat.has_toolbox() {
-            let tool_descriptions = chat.tool_descriptions();
-            debug!(
-                "Converting {} tool descriptions to Mistral format",
-                tool_descriptions.len()
-            );
-
-            if !tool_descriptions.is_empty() {
-                Some(
-                    tool_descriptions
-                        .into_iter()
-                        .map(|desc| MistralTool {
-                            r#type: "function".to_string(),
-                            function: MistralFunction {
-                                name: desc.name,
-                                description: desc.description,
-                                parameters: desc.parameters,
-                            },
-                        })
-                        .collect(),
-                )
-            } else {
-                None
-            }
-        } else {
-            debug!("No toolbox provided");
-            None
-        };
+        let tools = chat
+            .tools
+            .as_ref()
+            .map(|tools| tools.iter().map(MistralTool::from).collect());
 
         // Create the tool choice setting
         let tool_choice = if tools.is_some() {
@@ -354,11 +330,25 @@ pub(crate) struct MistralFunction {
     pub parameters: serde_json::Value,
 }
 
+impl From<&LlmToolInfo> for MistralTool {
+    fn from(value: &LlmToolInfo) -> Self {
+        MistralTool {
+            tool_type: "function".to_string(),
+            function: MistralFunction {
+                name: value.name.clone(),
+                description: value.description.clone(),
+                parameters: value.parameters.clone(),
+            },
+        }
+    }
+}
+
 /// Represents a tool in the Mistral API format
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct MistralTool {
     /// The type of the tool (currently always "function")
-    pub r#type: String,
+    #[serde(rename = "type")]
+    pub tool_type: String,
     /// The function definition
     pub function: MistralFunction,
 }
@@ -377,8 +367,6 @@ pub(crate) struct MistralFunctionCall {
 pub(crate) struct MistralToolCall {
     /// The ID of the tool call
     pub id: String,
-    /// The type of the tool (currently always "function")
-    pub r#type: String,
     /// The function call
     pub function: MistralFunctionCall,
 }
@@ -534,7 +522,6 @@ impl From<&Message> for MistralMessage {
                     for tc in tool_calls {
                         calls.push(MistralToolCall {
                             id: tc.id.clone(),
-                            r#type: tc.tool_type.clone(),
                             function: MistralFunctionCall {
                                 name: tc.function.name.clone(),
                                 arguments: tc.function.arguments.clone(),
@@ -590,7 +577,7 @@ impl From<&MistralResponse> for Message {
                         for call in mistral_tool_calls {
                             let tool_call = crate::message::ToolCall {
                                 id: call.id.clone(),
-                                tool_type: call.r#type.clone(),
+                                tool_type: "function".to_string(),
                                 function: crate::message::Function {
                                     name: call.function.name.clone(),
                                     arguments: call.function.arguments.clone(),

@@ -1,7 +1,7 @@
 use crate::error::{Error, Result};
 use crate::message::{Content, ContentPart, Message};
 use crate::provider::HTTPProvider;
-use crate::{Chat, ModelInfo};
+use crate::{Chat, LlmToolInfo, ModelInfo};
 use reqwest::{Method, Request, Url};
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -288,34 +288,10 @@ impl OpenAIProvider {
         debug!("Converted {} messages for the request", messages.len());
 
         // Add tools if present
-        let tools = if chat.has_toolbox() {
-            let tool_descriptions = chat.tool_descriptions();
-            debug!(
-                "Converting {} tool descriptions to OpenAI format",
-                tool_descriptions.len()
-            );
-
-            if !tool_descriptions.is_empty() {
-                Some(
-                    tool_descriptions
-                        .into_iter()
-                        .map(|desc| OpenAITool {
-                            r#type: "function".to_string(),
-                            function: OpenAIFunction {
-                                name: desc.name,
-                                description: desc.description,
-                                parameters: desc.parameters,
-                            },
-                        })
-                        .collect(),
-                )
-            } else {
-                None
-            }
-        } else {
-            debug!("No toolbox provided");
-            None
-        };
+        let tools = chat
+            .tools
+            .as_ref()
+            .map(|tools| tools.iter().map(OpenAITool::from).collect());
 
         // Create the tool choice setting
         let tool_choice = if tools.is_some() {
@@ -385,6 +361,19 @@ pub(crate) struct OpenAITool {
     pub r#type: String,
     /// The function definition
     pub function: OpenAIFunction,
+}
+
+impl From<&LlmToolInfo> for OpenAITool {
+    fn from(value: &LlmToolInfo) -> Self {
+        OpenAITool {
+            r#type: "function".to_string(),
+            function: OpenAIFunction {
+                name: value.name.clone(),
+                description: value.description.clone(),
+                parameters: value.parameters.clone(),
+            },
+        }
+    }
 }
 
 /// Represents a function call in the OpenAI API format

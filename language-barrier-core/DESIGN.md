@@ -865,6 +865,91 @@ When using the tool system, consider these best practices:
 
 This design creates a type-safe system that balances flexibility, safety, and simplicity, allowing developers to define strongly-typed tools without complicating the rest of the codebase with generics.
 
+#### 2025-04-20: Enhanced Tool System Design
+
+1. **ToolDefinition Trait**:
+   - Implemented the `ToolDefinition` trait with associated `Input` and `Output` types
+   - Provides stronger type safety through generics with associated types
+   - Separates tool definitions from execution logic
+   - Includes schema generation for the input type
+   - Allows for a more flexible and extensible tool system
+
+2. **ToolRegistry**:
+   - Created a new `ToolRegistry` for managing tools
+   - Supports registration of tools with the `ToolDefinition` trait
+   - Generates LLM-friendly tool descriptions
+   - Provides foundation for the future execution system in runtime crate
+   - Supports querying for tools by name
+
+3. **Compatibility Layer**:
+   - Implemented `ToolRegistryAdapter` for backward compatibility
+   - Allows using the new tool definitions with the existing execution system
+   - Enables gradual migration to the new tool system
+   - Preserves all existing functionality
+
+4. **LlmToolInfo**:
+   - Standardized structure for LLM-facing tool descriptions
+   - Used by tool registry to represent tools to LLMs
+   - Simplifies integration with different LLM providers
+
+5. **Enhanced Error Handling**:
+   - Created specialized `ToolError` type
+   - More granular error categories (schema errors, argument parsing, execution errors)
+   - Better diagnostics for debugging tool issues
+   - Type safety errors for output mismatches
+
+6. **Separation of Concerns**:
+   - Clear separation between tool definitions and execution logic
+   - Registry focuses on storing and describing tools
+   - Execution logic will be moved to runtime crate in future
+
+The new tool system design represents a significant improvement in type safety and flexibility, while maintaining backward compatibility with the existing system. The changes align with our overall architecture that separates core definitions from runtime execution. This prepares us for a future middleware-based execution model while preserving all current functionality.
+
+#### 2025-04-20: Tool Runtime Implementation in Runtime Crate
+
+1. **Free Monad Operations**:
+   - Implemented the `LlmOp<Next>` free monad for composable operations
+   - Added operations for chat, tool execution, and termination
+   - Created `LlmM<A>` monad wrapper with `and_then` and `map` combinators
+   - Enables representing complex LLM workflows as data structures
+
+2. **Tower Middleware Architecture**:
+   - Implemented middleware stack using Tower `Service` trait
+   - Created specialized middleware for different operations:
+     - `ChatMiddleware` for handling chat operations
+     - `ToolExecutorMiddleware` for executing tool calls with `ToolRegistry`
+     - `AutoToolExecutorMiddleware` for automatically executing tools and continuing conversations
+     - `BreakOnToolMiddleware` for stopping when specific tools are called
+   - Designed middleware to be composable and reusable
+
+3. **Tool Execution**:
+   - Implemented `execute_tool_with_registry` for type-safe tool execution
+   - Properly handles errors with appropriate conversions to core error types
+   - Maps tool execution results back to the LLM for continued conversation
+   - Maintains strong typing throughout the execution pipeline
+
+4. **Example Implementations**:
+   - Created comprehensive examples showing:
+     - Basic chat without tools
+     - Using the tool registry with middleware
+     - Breaking on specific tool calls
+     - Automatically executing tools and continuing conversations
+   - Examples demonstrate both the old toolbox and new tool registry approaches
+
+5. **Command-Line Interface**:
+   - Updated `main.rs` to support various example modes
+   - Easy to try different tool execution patterns
+
+The tool runtime implementation provides a full execution layer for the type-safe tool system defined in the core crate. It leverages the free monad pattern to represent operations as data and Tower middleware for composable execution. This architecture offers several key benefits:
+
+- **Separation of Concerns**: Clear separation between operation definition and execution
+- **Composability**: Middleware can be combined in various ways for different behaviors
+- **Type Safety**: Strong typing throughout the execution pipeline
+- **Extensibility**: Easy to add new operations and middleware
+- **Testability**: Operations can be tested independently of their execution
+
+The implementation completes the tool system by providing a flexible runtime layer that complements the core type definitions.
+
 ## Future Directions
 
 1. **Streaming**: Support for streaming responses from LLMs.
@@ -879,6 +964,7 @@ This design creates a type-safe system that balances flexibility, safety, and si
 10. **Proper Tokenization**: Replace the naive token counter with proper model-specific tokenizers.
 11. **Full Transport Integration**: Complete the transport visitor pattern implementation for all providers.
 12. **Comprehensive Integration Testing**: Expand integration tests to cover all features including tools, streaming, and vision capabilities.
+13. **Tool Runtime Implementation**: Implement the execution system for tools in the runtime crate. (Completed; see below)
 
 ## Implementation Notes
 

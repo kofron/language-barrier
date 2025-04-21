@@ -23,3 +23,4 @@ tokio-test = { workspace = true }
 dotenv = { workspace = true }
 hyper = { workspace = true }
 tracing-test = { workspace = true }
+parameterized = { workspace = true }
