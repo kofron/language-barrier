@@ -1,118 +1,181 @@
 use dotenv::dotenv;
-use std::sync::{Arc, Mutex};
 use language_barrier_core::SingleRequestExecutor;
-use language_barrier_core::model::{Claude, Gemini, GPT, Mistral, Sonnet35Version};
+use language_barrier_core::message::{Content, ContentPart};
+use language_barrier_core::model::{Claude, GPT, Gemini, Mistral, Sonnet35Version};
 use language_barrier_core::provider::HTTPProvider;
 use language_barrier_core::provider::anthropic::{AnthropicConfig, AnthropicProvider};
 use language_barrier_core::provider::gemini::{GeminiConfig, GeminiProvider};
 use language_barrier_core::provider::mistral::{MistralConfig, MistralProvider};
 use language_barrier_core::provider::openai::{OpenAIConfig, OpenAIProvider};
-use language_barrier_core::{Chat, Message, Tool, ToolDescription, Toolbox, Result};
-use language_barrier_core::message::{Content, ContentPart};
+use language_barrier_core::{Chat, Message, Result, ToolDefinition, ToolRegistry, error::ToolError};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::env;
-use tracing::{info, warn, Level};
-use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
+use std::sync::{Arc, Mutex};
+use tracing::{Level, info, warn};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*, registry};
 
 // Define the calculator tool request format
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 struct CalculatorRequest {
     operation: String,
     a: f64,
     b: f64,
 }
 
-impl Tool for CalculatorRequest {
-    fn name(&self) -> &str {
-        "calculator"
+#[derive(Debug, Clone, Serialize)]
+struct CalculatorResponse {
+    result: f64,
+    operation: String,
+    a: f64,
+    b: f64,
+}
+
+struct CalculatorTool;
+
+impl ToolDefinition for CalculatorTool {
+    type Input = CalculatorRequest;
+    type Output = CalculatorResponse;
+
+    fn name(&self) -> String {
+        "calculator".to_string()
     }
 
-    fn description(&self) -> &str {
-        "Perform a calculation between two numbers"
+    fn description(&self) -> String {
+        "Perform a calculation between two numbers".to_string()
     }
 }
 
-// Define a calculator toolbox that tracks call count
+// Define a calculator registry that tracks call count
 #[derive(Clone)]
-struct CalculatorToolbox {
+struct CountingCalculatorRegistry {
+    registry: ToolRegistry,
     call_count: Arc<Mutex<usize>>,
 }
 
-impl CalculatorToolbox {
+impl CountingCalculatorRegistry {
     fn new() -> Self {
+        let mut registry = ToolRegistry::new();
+        let call_count = Arc::new(Mutex::new(0));
+        
+        let counter = call_count.clone();
+        
+        // Register calculator tool with counting executor
+        registry.register_with_executor(CalculatorTool, move |_, args: &Value| -> std::result::Result<String, ToolError> {
+            // Increment call count
+            let mut count = counter.lock().unwrap();
+            *count += 1;
+            
+            // Parse the arguments
+            let request: CalculatorRequest = serde_json::from_value(args.clone())
+                .map_err(|e| ToolError::ArgumentParsingError("calculator".to_string(), e))?;
+            
+            // Perform the calculation
+            let result = match request.operation.as_str() {
+                "add" => request.a + request.b,
+                "subtract" => request.a - request.b,
+                "multiply" => request.a * request.b,
+                "divide" => {
+                    if request.b == 0.0 {
+                        return Err(ToolError::ExecutionError("Division by zero".to_string()));
+                    }
+                    request.a / request.b
+                }
+                _ => {
+                    return Err(ToolError::InvalidArguments(format!(
+                        "Unsupported operation: {}",
+                        request.operation
+                    )));
+                }
+            };
+            
+            // Create response
+            let response = CalculatorResponse {
+                result,
+                operation: request.operation.clone(),
+                a: request.a,
+                b: request.b,
+            };
+            
+            // Serialize the response
+            let json = serde_json::to_string(&response)
+                .map_err(|e| ToolError::ExecutionError(format!("Failed to serialize response: {}", e)))?;
+            
+            Ok(format!(
+                "The result of {} {} {} is {}",
+                request.a, request.operation, request.b, result
+            ))
+        }).unwrap();
+        
         Self {
-            call_count: Arc::new(Mutex::new(0)),
+            registry,
+            call_count,
         }
     }
 
     fn get_call_count(&self) -> usize {
         *self.call_count.lock().unwrap()
     }
+    
+    fn get_registry(&self) -> ToolRegistry {
+        self.registry.clone()
+    }
 }
 
-impl Toolbox for CalculatorToolbox {
-    fn describe(&self) -> Vec<ToolDescription> {
-        let schema = schemars::schema_for!(CalculatorRequest);
-        let schema_value = serde_json::to_value(schema.schema).unwrap();
+// Backward compatibility layer for tests
+#[derive(Clone)]
+struct CalculatorToolbox {
+    registry: CountingCalculatorRegistry,
+}
 
-        vec![ToolDescription {
-            name: "calculator".to_string(),
-            description: "Perform a calculation between two numbers".to_string(),
-            parameters: schema_value,
-        }]
+impl CalculatorToolbox {
+    fn new() -> Self {
+        Self {
+            registry: CountingCalculatorRegistry::new(),
+        }
+    }
+
+    fn get_call_count(&self) -> usize {
+        self.registry.get_call_count()
+    }
+}
+
+impl language_barrier_core::Toolbox for CalculatorToolbox {
+    fn describe(&self) -> Vec<language_barrier_core::ToolDescription> {
+        let llm_tools = self.registry.get_registry().get_tool_descriptions();
+        
+        // Convert LlmToolInfo to ToolDescription
+        llm_tools.into_iter().map(|tool| {
+            language_barrier_core::ToolDescription {
+                name: tool.name,
+                description: tool.description,
+                parameters: tool.parameters,
+            }
+        }).collect()
     }
 
     fn execute(&self, name: &str, arguments: Value) -> Result<String> {
-        if name != "calculator" {
-            return Err(language_barrier_core::Error::ToolNotFound(name.to_string()));
-        }
-
-        // Increment call count
-        let mut count = self.call_count.lock().unwrap();
-        *count += 1;
-
-        // Parse the arguments
-        let request: CalculatorRequest = serde_json::from_value(arguments)?;
-
-        // Perform the calculation
-        let result = match request.operation.as_str() {
-            "add" => request.a + request.b,
-            "subtract" => request.a - request.b,
-            "multiply" => request.a * request.b,
-            "divide" => {
-                if request.b == 0.0 {
-                    return Err(language_barrier_core::Error::ToolExecutionError(
-                        "Division by zero".to_string(),
-                    ));
-                }
-                request.a / request.b
-            }
-            _ => {
-                return Err(language_barrier_core::Error::ToolExecutionError(format!(
-                    "Unsupported operation: {}",
-                    request.operation
-                )))
-            }
-        };
-
-        Ok(format!("The result of {} {} {} is {}",
-            request.a, request.operation, request.b, result))
+        self.registry.get_registry().execute_tool(name, &arguments)
+            .map_err(language_barrier_core::Error::from)
     }
 }
 
 // Helper function to set up logging for tests
 fn setup_tracing(level: Level) {
     let subscriber = registry()
-        .with(fmt::layer()
-            .with_test_writer()
-            .with_ansi(false) // Better for CI logs
-            .with_file(true)  // Include source code location
-            .with_line_number(true))
-        .with(EnvFilter::from_default_env()
-            .add_directive(level.into())
-            .add_directive("reqwest=info".parse().unwrap())); // Lower verbosity for reqwest
+        .with(
+            fmt::layer()
+                .with_test_writer()
+                .with_ansi(false) // Better for CI logs
+                .with_file(true) // Include source code location
+                .with_line_number(true),
+        )
+        .with(
+            EnvFilter::from_default_env()
+                .add_directive(level.into())
+                .add_directive("reqwest=info".parse().unwrap()),
+        ); // Lower verbosity for reqwest
 
     let _ = tracing::subscriber::set_global_default(subscriber);
 }
@@ -132,13 +195,16 @@ async fn test_calculator_tool() {
             info!("Testing Anthropic calculator tool");
             test_calculator_with_provider(
                 "Anthropic",
-                Chat::new(Claude::Sonnet35 { version: Sonnet35Version::V2 }),
+                Chat::new(Claude::Sonnet35 {
+                    version: Sonnet35Version::V2,
+                }),
                 AnthropicProvider::with_config(AnthropicConfig {
                     api_key,
                     base_url: "https://api.anthropic.com/v1".to_string(),
                     api_version: "2023-06-01".to_string(),
-                })
-            ).await;
+                }),
+            )
+            .await;
         }
     }
 
@@ -153,8 +219,9 @@ async fn test_calculator_tool() {
                     api_key,
                     base_url: "https://api.openai.com/v1".to_string(),
                     organization: None,
-                })
-            ).await;
+                }),
+            )
+            .await;
         }
     }
 
@@ -168,8 +235,9 @@ async fn test_calculator_tool() {
                 GeminiProvider::with_config(GeminiConfig {
                     api_key,
                     base_url: "https://generativelanguage.googleapis.com/v1beta".to_string(),
-                })
-            ).await;
+                }),
+            )
+            .await;
         }
     }
 
@@ -183,18 +251,16 @@ async fn test_calculator_tool() {
                 MistralProvider::with_config(MistralConfig {
                     api_key,
                     base_url: "https://api.mistral.ai/v1".to_string(),
-                })
-            ).await;
+                }),
+            )
+            .await;
         }
     }
 }
 
 // Helper function to test calculator tool with a specific provider
-async fn test_calculator_with_provider<P, M>(
-    provider_name: &str,
-    base_chat: Chat<M>,
-    provider: P
-) where
+async fn test_calculator_with_provider<P, M>(provider_name: &str, base_chat: Chat<M>, provider: P)
+where
     P: HTTPProvider<M> + 'static,
     M: Clone + language_barrier_core::model::ModelInfo,
 {
@@ -243,7 +309,12 @@ async fn test_calculator_with_provider<P, M>(
                         info!("{} tool calls processed successfully", provider_name);
 
                         // Verify that the tool was called
-                        assert_eq!(toolbox.get_call_count(), 1, "{} should have called the calculator once", provider_name);
+                        assert_eq!(
+                            toolbox.get_call_count(),
+                            1,
+                            "{} should have called the calculator once",
+                            provider_name
+                        );
 
                         // Get final response that should include the calculation result
                         match executor.send(new_chat).await {
@@ -263,35 +334,42 @@ async fn test_calculator_with_provider<P, M>(
                                                     }
                                                 }
                                                 combined
-                                            },
+                                            }
                                             None => String::new(),
                                         };
 
                                         // The result should mention 56088 (123 * 456)
                                         assert!(
-                                            text.contains("56088") ||
-                                            text.contains("56,088") ||
-                                            text.contains("56 088"),
-                                            "{} should include the correct calculation result", provider_name
+                                            text.contains("56088")
+                                                || text.contains("56,088")
+                                                || text.contains("56 088"),
+                                            "{} should include the correct calculation result",
+                                            provider_name
                                         );
 
-                                        info!("{} calculator test successful with correct result", provider_name);
-                                    },
+                                        info!(
+                                            "{} calculator test successful with correct result",
+                                            provider_name
+                                        );
+                                    }
                                     _ => warn!("{} didn't return assistant message", provider_name),
                                 }
-                            },
+                            }
                             Err(e) => {
                                 warn!("{} final response request failed: {}", provider_name, e);
                             }
                         }
-                    },
+                    }
                     Err(e) => {
                         warn!("{} tool call processing failed: {}", provider_name, e);
                     }
                 }
             } else {
                 // Some models might get the calculation right without using tools
-                info!("{} response doesn't contain tool calls, checking direct answer", provider_name);
+                info!(
+                    "{} response doesn't contain tool calls, checking direct answer",
+                    provider_name
+                );
 
                 match &response {
                     Message::Assistant { content, .. } => {
@@ -305,21 +383,30 @@ async fn test_calculator_with_provider<P, M>(
                                     }
                                 }
                                 combined
-                            },
+                            }
                             None => String::new(),
                         };
 
                         // Check if the response contains the correct result even without tool use
-                        if text.contains("56088") || text.contains("56,088") || text.contains("56 088") {
-                            info!("{} provided correct calculation result without using the tool", provider_name);
+                        if text.contains("56088")
+                            || text.contains("56,088")
+                            || text.contains("56 088")
+                        {
+                            info!(
+                                "{} provided correct calculation result without using the tool",
+                                provider_name
+                            );
                         } else {
-                            warn!("{} didn't use the tool and didn't provide the correct result", provider_name);
+                            warn!(
+                                "{} didn't use the tool and didn't provide the correct result",
+                                provider_name
+                            );
                         }
-                    },
+                    }
                     _ => warn!("{} didn't return assistant message", provider_name),
                 }
             }
-        },
+        }
         Err(e) => {
             warn!("{} calculator tool test failed: {}", provider_name, e);
         }
@@ -345,13 +432,16 @@ async fn test_calculator_error_handling() {
                 provider_tested = true;
                 test_calculator_error_with_provider(
                     "Anthropic",
-                    Chat::new(Claude::Sonnet35 { version: Sonnet35Version::V2 }),
+                    Chat::new(Claude::Sonnet35 {
+                        version: Sonnet35Version::V2,
+                    }),
                     AnthropicProvider::with_config(AnthropicConfig {
                         api_key,
                         base_url: "https://api.anthropic.com/v1".to_string(),
                         api_version: "2023-06-01".to_string(),
-                    })
-                ).await;
+                    }),
+                )
+                .await;
             }
         }
     }
@@ -368,8 +458,9 @@ async fn test_calculator_error_handling() {
                         api_key,
                         base_url: "https://api.openai.com/v1".to_string(),
                         organization: None,
-                    })
-                ).await;
+                    }),
+                )
+                .await;
             }
         }
     }
@@ -385,8 +476,9 @@ async fn test_calculator_error_handling() {
                     GeminiProvider::with_config(GeminiConfig {
                         api_key,
                         base_url: "https://generativelanguage.googleapis.com/v1beta".to_string(),
-                    })
-                ).await;
+                    }),
+                )
+                .await;
             }
         }
     }
@@ -402,8 +494,9 @@ async fn test_calculator_error_handling() {
                     MistralProvider::with_config(MistralConfig {
                         api_key,
                         base_url: "https://api.mistral.ai/v1".to_string(),
-                    })
-                ).await;
+                    }),
+                )
+                .await;
             }
         }
     }
@@ -417,7 +510,7 @@ async fn test_calculator_error_handling() {
 async fn test_calculator_error_with_provider<P, M>(
     provider_name: &str,
     base_chat: Chat<M>,
-    provider: P
+    provider: P,
 ) where
     P: HTTPProvider<M> + 'static,
     M: Clone + language_barrier_core::model::ModelInfo,
@@ -440,7 +533,10 @@ async fn test_calculator_error_with_provider<P, M>(
     // Get the response
     match executor.send(chat).await {
         Ok(response) => {
-            info!("{} division by zero request sent successfully", provider_name);
+            info!(
+                "{} division by zero request sent successfully",
+                provider_name
+            );
 
             // Check if the response includes a tool call
             let has_tool_calls = match &response {
@@ -465,18 +561,32 @@ async fn test_calculator_error_with_provider<P, M>(
                 match new_chat.process_tool_calls(&response) {
                     Ok(()) => {
                         // We should still have at least one tool call even if it failed
-                        assert!(toolbox.get_call_count() > 0, "{} should have called the calculator", provider_name);
+                        assert!(
+                            toolbox.get_call_count() > 0,
+                            "{} should have called the calculator",
+                            provider_name
+                        );
 
                         // Check that the tool response includes an error message
                         let tool_response = new_chat.history.last().unwrap();
                         match tool_response {
                             Message::Tool { content, .. } => {
-                                assert!(content.contains("Division by zero") || content.contains("error"),
-                                       "{} tool response should contain an error message", provider_name);
+                                assert!(
+                                    content.contains("Division by zero")
+                                        || content.contains("error"),
+                                    "{} tool response should contain an error message",
+                                    provider_name
+                                );
 
-                                info!("{} tool response indicates division by zero error as expected", provider_name);
-                            },
-                            _ => warn!("{} unexpected message type for tool response", provider_name),
+                                info!(
+                                    "{} tool response indicates division by zero error as expected",
+                                    provider_name
+                                );
+                            }
+                            _ => warn!(
+                                "{} unexpected message type for tool response",
+                                provider_name
+                            ),
                         }
 
                         // Get final response that should acknowledge the error
@@ -497,44 +607,57 @@ async fn test_calculator_error_with_provider<P, M>(
                                                     }
                                                 }
                                                 combined
-                                            },
+                                            }
                                             None => String::new(),
                                         };
 
                                         // The response should explain that division by zero is undefined
                                         assert!(
-                                            text.contains("undefined") ||
-                                            text.contains("not defined") ||
-                                            text.contains("impossible") ||
-                                            text.contains("error") ||
-                                            text.contains("can't divide"),
-                                            "{} should explain that division by zero is undefined", provider_name
+                                            text.contains("undefined")
+                                                || text.contains("not defined")
+                                                || text.contains("impossible")
+                                                || text.contains("error")
+                                                || text.contains("can't divide"),
+                                            "{} should explain that division by zero is undefined",
+                                            provider_name
                                         );
 
-                                        info!("{} calculator error test successful with proper explanation", provider_name);
-                                    },
+                                        info!(
+                                            "{} calculator error test successful with proper explanation",
+                                            provider_name
+                                        );
+                                    }
                                     _ => warn!("{} didn't return assistant message", provider_name),
                                 }
-                            },
+                            }
                             Err(e) => {
                                 warn!("{} final response request failed: {}", provider_name, e);
                             }
                         }
-                    },
+                    }
                     Err(e) => {
-                        info!("{} tool call processing failed as expected for division by zero: {}", provider_name, e);
+                        info!(
+                            "{} tool call processing failed as expected for division by zero: {}",
+                            provider_name, e
+                        );
                         // Accept any error message related to the calculation
-                        assert!(e.to_string().contains("Division by zero") ||
-                               e.to_string().contains("div") ||
-                               e.to_string().contains("zero") ||
-                               e.to_string().contains("Unsupported operation") ||
-                               e.to_string().contains("/"),
-                               "Error should be related to division or calculation: {}", e);
+                        assert!(
+                            e.to_string().contains("Division by zero")
+                                || e.to_string().contains("div")
+                                || e.to_string().contains("zero")
+                                || e.to_string().contains("Unsupported operation")
+                                || e.to_string().contains("/"),
+                            "Error should be related to division or calculation: {}",
+                            e
+                        );
                     }
                 }
             } else {
                 // The model might correctly explain division by zero without using the tool
-                info!("{} response doesn't contain tool calls, checking direct answer", provider_name);
+                info!(
+                    "{} response doesn't contain tool calls, checking direct answer",
+                    provider_name
+                );
 
                 match &response {
                     Message::Assistant { content, .. } => {
@@ -548,24 +671,31 @@ async fn test_calculator_error_with_provider<P, M>(
                                     }
                                 }
                                 combined
-                            },
+                            }
                             None => String::new(),
                         };
 
                         // Check if the response explains division by zero
-                        if text.contains("undefined") ||
-                           text.contains("not defined") ||
-                           text.contains("impossible") ||
-                           text.contains("can't divide") {
-                            info!("{} correctly explained division by zero without using the tool", provider_name);
+                        if text.contains("undefined")
+                            || text.contains("not defined")
+                            || text.contains("impossible")
+                            || text.contains("can't divide")
+                        {
+                            info!(
+                                "{} correctly explained division by zero without using the tool",
+                                provider_name
+                            );
                         } else {
-                            warn!("{} didn't use the tool and didn't properly explain division by zero", provider_name);
+                            warn!(
+                                "{} didn't use the tool and didn't properly explain division by zero",
+                                provider_name
+                            );
                         }
-                    },
+                    }
                     _ => warn!("{} didn't return assistant message", provider_name),
                 }
             }
-        },
+        }
         Err(e) => {
             warn!("{} calculator error test failed: {}", provider_name, e);
         }

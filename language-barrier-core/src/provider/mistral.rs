@@ -1,7 +1,7 @@
 use crate::error::{Error, Result};
 use crate::message::{Content, ContentPart, Message};
 use crate::provider::HTTPProvider;
-use crate::{Chat, ModelInfo};
+use crate::{Chat, LlmToolInfo, ModelInfo};
 use reqwest::{Method, Request, Url};
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -269,34 +269,10 @@ impl MistralProvider {
         debug!("Converted {} messages for the request", messages.len());
 
         // Add tools if present
-        let tools = if chat.has_toolbox() {
-            let tool_descriptions = chat.tool_descriptions();
-            debug!(
-                "Converting {} tool descriptions to Mistral format",
-                tool_descriptions.len()
-            );
-
-            if !tool_descriptions.is_empty() {
-                Some(
-                    tool_descriptions
-                        .into_iter()
-                        .map(|desc| MistralTool {
-                            r#type: "function".to_string(),
-                            function: MistralFunction {
-                                name: desc.name,
-                                description: desc.description,
-                                parameters: desc.parameters,
-                            },
-                        })
-                        .collect(),
-                )
-            } else {
-                None
-            }
-        } else {
-            debug!("No toolbox provided");
-            None
-        };
+        let tools = chat
+            .tools
+            .as_ref()
+            .map(|tools| tools.iter().map(MistralTool::from).collect());
 
         // Create the tool choice setting
         let tool_choice = if tools.is_some() {
@@ -352,6 +328,19 @@ pub(crate) struct MistralFunction {
     pub description: String,
     /// The parameters schema as a JSON object
     pub parameters: serde_json::Value,
+}
+
+impl From<&LlmToolInfo> for MistralTool {
+    fn from(value: &LlmToolInfo) -> Self {
+        MistralTool {
+            r#type: "function".to_string(),
+            function: MistralFunction {
+                name: value.name.clone(),
+                description: value.description.clone(),
+                parameters: value.parameters.clone(),
+            },
+        }
+    }
 }
 
 /// Represents a tool in the Mistral API format

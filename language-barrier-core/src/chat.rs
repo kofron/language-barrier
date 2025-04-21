@@ -1,8 +1,8 @@
-use crate::ModelInfo;
 use crate::compactor::{ChatHistoryCompactor, DropOldestCompactor};
 use crate::message::{Content, Message};
 use crate::token::TokenCounter;
-use crate::tool::{Toolbox, ToolDescription, ToolRegistry, LlmToolInfo, ToolRegistryAdapter, ToolEntry};
+use crate::tool::LlmToolInfo;
+use crate::{ModelInfo, Result, ToolDefinition};
 
 /// The main Chat client that users will interact with
 pub struct Chat<M: ModelInfo> {
@@ -17,12 +17,9 @@ pub struct Chat<M: ModelInfo> {
     pub history: Vec<Message>,
     token_counter: TokenCounter,
     compactor: Box<dyn ChatHistoryCompactor>,
-    
-    // Optional toolbox for function/tool calling
-    toolbox: Option<Box<dyn Toolbox>>,
-    
-    // New registry for type-safe tool definitions (optional)
-    tool_registry: Option<ToolRegistry>,
+
+    // Registry for type-safe tool definitions (optional)
+    pub tools: Option<Vec<LlmToolInfo>>,
 }
 
 impl<M> Chat<M>
@@ -38,8 +35,7 @@ where
             history: Vec::new(),
             token_counter: TokenCounter::default(),
             compactor: Box::<DropOldestCompactor>::default(),
-            toolbox: None,
-            tool_registry: None,
+            tools: None,
         }
     }
 
@@ -67,12 +63,12 @@ where
                     if let Content::Text(text) = content {
                         self.token_counter.observe(text);
                     }
-                },
+                }
                 Message::Assistant { content, .. } => {
                     if let Some(Content::Text(text)) = content {
                         self.token_counter.observe(text);
                     }
-                },
+                }
                 Message::System { content, .. } | Message::Tool { content, .. } => {
                     self.token_counter.observe(content);
                 }
@@ -111,12 +107,12 @@ where
                 if let Content::Text(text) = content {
                     self.token_counter.observe(text);
                 }
-            },
+            }
             Message::Assistant { content, .. } => {
                 if let Some(Content::Text(text)) = content {
                     self.token_counter.observe(text);
                 }
-            },
+            }
             Message::System { content, .. } | Message::Tool { content, .. } => {
                 self.token_counter.observe(content);
             }
@@ -124,7 +120,7 @@ where
         self.history.push(msg);
         self.trim_to_context_window();
     }
-    
+
     /// Alias for `push_message` for better readability
     pub fn add_message(&mut self, msg: Message) {
         self.push_message(msg);
@@ -147,146 +143,28 @@ where
     pub fn tokens_used(&self) -> usize {
         self.token_counter.total()
     }
-    
-    /// Sets a toolbox for function/tool calling
-    #[must_use]
-    pub fn with_toolbox<T: Toolbox + 'static>(mut self, toolbox: T) -> Self {
-        self.toolbox = Some(Box::new(toolbox));
-        self
-    }
-    
-    /// Sets a toolbox at runtime
-    pub fn set_toolbox<T: Toolbox + 'static>(&mut self, toolbox: T) {
-        self.toolbox = Some(Box::new(toolbox));
-    }
-    
-    /// Gets the tool descriptions from the current toolbox
-    pub fn tool_descriptions(&self) -> Vec<ToolDescription> {
-        match &self.toolbox {
-            Some(toolbox) => toolbox.describe(),
-            None => Vec::new(),
-        }
-    }
-    
-    /// Processes tool calls from a message and adds tool response messages
-    /// 
-    /// This function examines an assistant message for tool calls, executes them
-    /// using the current toolbox, and adds the tool response messages to the history.
-    /// 
-    /// # Errors
-    /// 
-    /// Returns an error if:
-    /// - Tool execution fails
-    /// - The tool call arguments cannot be parsed
-    /// - Any provider-specific error occurs during execution
-    /// 
-    /// # Panics
-    /// 
-    /// Panics if `toolbox` is accessed when it is `None`. This should never happen
-    /// because we check for toolbox existence at the beginning of the method.
-    pub fn process_tool_calls(&mut self, assistant_message: &Message) -> crate::error::Result<()> {
-        // If there's no toolbox, there's nothing to do
-        if self.toolbox.is_none() {
-            return Ok(());
-        }
-        
-        // Extract tool calls if any
-        let tool_calls = match assistant_message {
-            Message::Assistant { tool_calls, .. } => {
-                if tool_calls.is_empty() {
-                    return Ok(());
-                }
-                tool_calls
-            },
-            _ => return Ok(()),
+
+    /// Add a tool
+    pub fn with_tool(self, tool: impl ToolDefinition) -> Result<Self> {
+        let info = LlmToolInfo {
+            name: tool.name(),
+            description: tool.description(),
+            parameters: tool.schema()?,
         };
         
-        // Process each tool call and collect responses first
-        let mut responses = Vec::new();
+        let tools = match self.tools {
+            Some(mut tools) => {
+                tools.push(info);
+                Some(tools)
+            },
+            None => Some(vec![info]),
+        };
         
-        for tool_call in tool_calls {
-            // Execute the tool call
-            let result = self.toolbox.as_ref().unwrap().execute(
-                &tool_call.function.name, 
-                serde_json::from_str(&tool_call.function.arguments)?
-            )?;
-            
-            // Create a tool response message
-            let tool_message = Message::tool(tool_call.id.clone(), result);
-            responses.push(tool_message);
-        }
-        
-        // Now add all the responses to history
-        for message in responses {
-            self.add_message(message);
-        }
-        
-        Ok(())
-    }
-    
-    /// Clears the toolbox
-    pub fn clear_toolbox(&mut self) {
-        self.toolbox = None;
-    }
-    
-    /// Returns true if the chat has a toolbox configured
-    pub fn has_toolbox(&self) -> bool {
-        self.toolbox.is_some()
-    }
-    
-    /// Sets a tool registry for this chat
-    #[must_use]
-    pub fn with_tool_registry(mut self, registry: ToolRegistry) -> Self {
-        self.tool_registry = Some(registry);
-        self
-    }
-    
-    /// Sets a tool registry at runtime
-    pub fn set_tool_registry(&mut self, registry: ToolRegistry) {
-        self.tool_registry = Some(registry);
-    }
-    
-    /// Gets the tool descriptions from the new registry
-    pub fn registry_tool_descriptions(&self) -> Vec<LlmToolInfo> {
-        match &self.tool_registry {
-            Some(registry) => registry.get_tool_descriptions(),
-            None => Vec::new(),
-        }
-    }
-    
-    /// Creates a ToolRegistryAdapter from the current registry and sets it as the toolbox
-    pub fn use_registry_as_toolbox(&mut self) -> crate::error::Result<()> {
-        if let Some(registry) = &self.tool_registry {
-            let adapter = ToolRegistryAdapter::new(registry.clone());
-            self.toolbox = Some(Box::new(adapter));
-            Ok(())
-        } else {
-            Err(crate::Error::Other("No tool registry is configured".to_string()))
-        }
-    }
-    
-    /// Returns true if the chat has a tool registry configured
-    pub fn has_tool_registry(&self) -> bool {
-        self.tool_registry.is_some()
-    }
-}
+        let new_chat = Self {
+            tools,
+            ..self
+        };
 
-// ToolRegistry needs to be clonable to support adapter creation
-impl Clone for ToolRegistry {
-    fn clone(&self) -> Self {
-        // Create a new registry with the same tools
-        let mut registry = ToolRegistry::new();
-        
-        // Copy the tool entries
-        for (name, entry) in &self.tools {
-            let cloned_entry = ToolEntry {
-                name: entry.name.clone(),
-                description: entry.description.clone(),
-                schema: entry.schema.clone(),
-            };
-            registry.tools.insert(name.clone(), cloned_entry);
-        }
-        
-        registry
+        Ok(new_chat)
     }
 }

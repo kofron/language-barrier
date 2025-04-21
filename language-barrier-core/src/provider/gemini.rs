@@ -1,7 +1,7 @@
 use crate::error::{Error, Result};
 use crate::message::{Content, ContentPart, Message};
 use crate::provider::HTTPProvider;
-use crate::{Chat, ModelInfo};
+use crate::{Chat, LlmToolInfo, ModelInfo};
 use reqwest::{Method, Request, Url};
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -361,35 +361,15 @@ impl GeminiProvider {
             stop_sequences: None,
         });
 
-        // Add tools if present
-        let tools = if chat.has_toolbox() {
-            let tool_descriptions = chat.tool_descriptions();
-            debug!(
-                "Converting {} tool descriptions to Gemini format",
-                tool_descriptions.len()
-            );
-
-            if !tool_descriptions.is_empty() {
-                // Gemini uses a slightly different format with functionDeclarations
-                let function_declarations = tool_descriptions
-                    .into_iter()
-                    .map(|desc| GeminiFunctionDeclaration {
-                        name: desc.name,
-                        description: desc.description,
-                        parameters: desc.parameters,
-                    })
-                    .collect();
-
-                Some(vec![GeminiTool {
-                    function_declarations,
-                }])
-            } else {
-                None
-            }
-        } else {
-            debug!("No toolbox provided");
-            None
-        };
+        // Convert tool descriptions if a tool registry is provided
+        let tools = chat.tools.as_ref().map(|tools| {
+            vec![GeminiTool {
+                function_declarations: tools
+                    .iter()
+                    .map(|t| GeminiFunctionDeclaration::from(t))
+                    .collect(),
+            }]
+        });
 
         // Create the request
         debug!("Creating GeminiRequest");
@@ -498,6 +478,16 @@ pub(crate) struct GeminiFunctionDeclaration {
     pub description: String,
     /// The parameters schema
     pub parameters: serde_json::Value,
+}
+
+impl From<&LlmToolInfo> for GeminiFunctionDeclaration {
+    fn from(value: &LlmToolInfo) -> Self {
+        return GeminiFunctionDeclaration {
+            name: value.name.clone(),
+            description: value.description.clone(),
+            parameters: value.parameters.clone(),
+        };
+    }
 }
 
 /// Represents a function in the Gemini API format (tools are called functions in Gemini)

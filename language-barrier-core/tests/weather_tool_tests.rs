@@ -1,22 +1,19 @@
 use language_barrier_core::SingleRequestExecutor;
-use language_barrier_core::model::{Claude, Gemini, GPT, Mistral, Sonnet35Version};
+
+use language_barrier_core::model::{Claude, GPT, Gemini, Mistral, Sonnet35Version};
 use language_barrier_core::provider::HTTPProvider;
 use language_barrier_core::{Chat, Message};
-use language_barrier_core::message::{Content, ContentPart};
-use tracing::{info, warn, Level};
+use test_tools::WeatherTool;
+use tracing::{Level, error, info, warn};
 
 // Import our helper modules
-mod test_utils;
 mod test_tools;
+mod test_utils;
 
 use test_utils::{
+    get_anthropic_provider, get_gemini_provider, get_mistral_provider, get_openai_provider,
     setup_tracing,
-    get_anthropic_provider,
-    get_openai_provider,
-    get_gemini_provider,
-    get_mistral_provider
 };
-use test_tools::WeatherToolbox;
 
 // Test request creation with weather tools for all providers
 #[tokio::test]
@@ -28,11 +25,13 @@ async fn test_weather_tool_request_creation() {
     {
         info!("Testing Anthropic weather tool request creation");
         let provider = get_anthropic_provider().unwrap_or_default();
-        let model = Claude::Sonnet35 { version: Sonnet35Version::V2 };
+        let model = Claude::Sonnet35 {
+            version: Sonnet35Version::V2,
+        };
         let mut chat = Chat::new(model)
             .with_system_prompt("You are a helpful AI assistant.")
             .with_max_output_tokens(1000)
-            .with_toolbox(WeatherToolbox);
+            .with_tool(WeatherTool);
 
         chat.add_message(Message::user("What's the weather in San Francisco?"));
 
@@ -56,7 +55,7 @@ async fn test_weather_tool_request_creation() {
         let mut chat = Chat::new(model)
             .with_system_prompt("You are a helpful AI assistant.")
             .with_max_output_tokens(1000)
-            .with_toolbox(WeatherToolbox);
+            .with_tool_registry(registry);
 
         chat.add_message(Message::user("What's the weather in San Francisco?"));
 
@@ -80,7 +79,7 @@ async fn test_weather_tool_request_creation() {
         let mut chat = Chat::new(model)
             .with_system_prompt("You are a helpful AI assistant.")
             .with_max_output_tokens(1000)
-            .with_toolbox(WeatherToolbox);
+            .with_tool_registry(registry);
 
         chat.add_message(Message::user("What's the weather in San Francisco?"));
 
@@ -102,7 +101,7 @@ async fn test_weather_tool_request_creation() {
         let mut chat = Chat::new(model)
             .with_system_prompt("You are a helpful AI assistant.")
             .with_max_output_tokens(1000)
-            .with_toolbox(WeatherToolbox);
+            .with_tool_registry(registry);
 
         chat.add_message(Message::user("What's the weather in San Francisco?"));
 
@@ -125,44 +124,41 @@ async fn test_weather_tool_integration() {
     setup_tracing(Level::INFO);
     info!("Starting test_weather_tool_integration");
 
+    // Create a WeatherToolbox with proper defaults
+    let registry = test_tools::create_weather_registry();
+
     // Test with Anthropic if credentials available
     if let Some(provider) = get_anthropic_provider() {
         info!("Testing Anthropic weather tool integration");
         test_weather_tool_with_provider(
             "Anthropic",
-            Chat::new(Claude::Sonnet35 { version: Sonnet35Version::V2 }),
-            provider
-        ).await;
+            Chat::new(Claude::Sonnet35 {
+                version: Sonnet35Version::V2,
+            }),
+            provider,
+            registry,
+        )
+        .await;
     }
 
     // Test with OpenAI if credentials available
     if let Some(provider) = get_openai_provider() {
         info!("Testing OpenAI weather tool integration");
-        test_weather_tool_with_provider(
-            "OpenAI",
-            Chat::new(GPT::GPT4o),
-            provider
-        ).await;
+        test_weather_tool_with_provider("OpenAI", Chat::new(GPT::GPT4o), provider, registry).await;
     }
 
     // Test with Gemini if credentials available
     if let Some(provider) = get_gemini_provider() {
         info!("Testing Gemini weather tool integration");
-        test_weather_tool_with_provider(
-            "Gemini",
-            Chat::new(Gemini::Flash20),
-            provider
-        ).await;
+        test_weather_tool_with_provider("Gemini", Chat::new(Gemini::Flash20), provider, registry)
+            .await;
     }
 
     // Test with Mistral if credentials available
     if let Some(provider) = get_mistral_provider() {
         info!("Testing Mistral weather tool integration");
-        test_weather_tool_with_provider(
-            "Mistral",
-            Chat::new(Mistral::Small),
-            provider
-        ).await;
+        test_weather_tool_with_provider("Mistral", Chat::new(Mistral::Small), provider, registry)
+            .await;
     }
 }
 
@@ -170,7 +166,8 @@ async fn test_weather_tool_integration() {
 async fn test_weather_tool_with_provider<P, M>(
     provider_name: &str,
     base_chat: Chat<M>,
-    provider: P
+    provider: P,
+    weather_registry: ToolRegistry,
 ) where
     P: HTTPProvider<M> + 'static,
     M: Clone + language_barrier_core::model::ModelInfo,
@@ -179,7 +176,7 @@ async fn test_weather_tool_with_provider<P, M>(
     let mut chat = Chat::new(base_chat.model.clone())
         .with_system_prompt("You are a helpful AI assistant that can provide weather information. Always use the weather tool when asked about weather.")
         .with_max_output_tokens(1000)
-        .with_toolbox(WeatherToolbox);
+        .with_tool_registry(weather_registry);
 
     // Add a user message
     chat.add_message(Message::user("What's the weather in Paris?"));
@@ -189,82 +186,16 @@ async fn test_weather_tool_with_provider<P, M>(
 
     // Get the response
     match executor.send(chat).await {
-        Ok(response) => {
+        Ok(Message::Assistant { tool_calls, .. }) if tool_calls.is_empty() => {
+            warn!("{} assistant replied, but no tool called", provider_name);
+        }
+        Ok(Message::Assistant { .. }) => {
             info!("{} weather tool test successful", provider_name);
+        }
+        Ok(_) => {
+            error!("{} messages are out of order")
+        }
 
-            // Check if the response includes a tool call
-            let has_tool_calls = match &response {
-                Message::Assistant { tool_calls, .. } => !tool_calls.is_empty(),
-                _ => false,
-            };
-
-            if has_tool_calls {
-                info!("{} response contains tool calls", provider_name);
-
-                // Create a new chat with tool response processing
-                let mut new_chat = base_chat
-                    .with_system_prompt("You are a helpful AI assistant that can provide weather information.")
-                    .with_max_output_tokens(1000)
-                    .with_toolbox(WeatherToolbox);
-
-                // Add the original message and response
-                new_chat.add_message(Message::user("What's the weather in Paris?"));
-                new_chat.add_message(response.clone());
-
-                // Process the tool calls
-                match new_chat.process_tool_calls(&response) {
-                    Ok(()) => {
-                        info!("{} tool calls processed successfully", provider_name);
-
-                        // Add a follow-up question
-                        new_chat.add_message(Message::user("How about the weather in London?"));
-
-                        // Get follow-up response
-                        match executor.send(new_chat).await {
-                            Ok(follow_up) => {
-                                info!("{} follow-up response received", provider_name);
-
-                                // Check if the follow-up mentions London
-                                let refers_to_london = match &follow_up {
-                                    Message::Assistant { content, tool_calls, .. } => {
-                                        // Check content for London reference
-                                        let in_content = match content {
-                                            Some(Content::Text(text)) => text.contains("London"),
-                                            Some(Content::Parts(parts)) => parts.iter().any(|part| {
-                                                if let ContentPart::Text { text } = part {
-                                                    text.contains("London")
-                                                } else {
-                                                    false
-                                                }
-                                            }),
-                                            None => false,
-                                        };
-
-                                        // Check tool calls for London reference
-                                        let in_tool_calls = tool_calls.iter().any(|call| {
-                                            call.function.arguments.contains("London")
-                                        });
-
-                                        in_content || in_tool_calls
-                                    },
-                                    _ => false,
-                                };
-
-                                assert!(refers_to_london, "{} should reference London in follow-up", provider_name);
-                            },
-                            Err(e) => {
-                                warn!("{} follow-up request failed: {}", provider_name, e);
-                            }
-                        }
-                    },
-                    Err(e) => {
-                        warn!("{} tool call processing failed: {}", provider_name, e);
-                    }
-                }
-            } else {
-                info!("{} response doesn't contain tool calls, skipping follow-up test", provider_name);
-            }
-        },
         Err(e) => {
             warn!("{} weather tool test failed: {}", provider_name, e);
         }

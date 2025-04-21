@@ -1,15 +1,15 @@
 use dotenv::dotenv;
 use language_barrier_core::SingleRequestExecutor;
+use language_barrier_core::message::{Content, ContentPart};
 use language_barrier_core::model::{Claude, Sonnet35Version};
 use language_barrier_core::provider::anthropic::{AnthropicConfig, AnthropicProvider};
-use language_barrier_core::{Chat, Message, Tool, ToolDescription, Toolbox, Result};
-use language_barrier_core::message::{Content, ContentPart};
+use language_barrier_core::{Chat, Message, Result, Tool, ToolDefinition, Toolbox};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::env;
-use tracing::{info, warn, Level};
-use tracing_subscriber::{fmt, prelude::*, registry, EnvFilter};
+use tracing::{Level, info, warn};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*, registry};
 
 // Define a simple weather tool
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -37,13 +37,11 @@ impl Toolbox for TestToolbox {
         let weather_schema = schemars::schema_for!(WeatherRequest);
         let weather_schema_value = serde_json::to_value(weather_schema.schema).unwrap();
 
-        vec![
-            ToolDescription {
-                name: "get_weather".to_string(),
-                description: "Get current weather for a location".to_string(),
-                parameters: weather_schema_value,
-            },
-        ]
+        vec![ToolDescription {
+            name: "get_weather".to_string(),
+            description: "Get current weather for a location".to_string(),
+            parameters: weather_schema_value,
+        }]
     }
 
     fn execute(&self, name: &str, arguments: Value) -> Result<String> {
@@ -65,13 +63,14 @@ impl Toolbox for TestToolbox {
 async fn test_multi_turn_conversation_with_tools() {
     // Initialize tracing for this test
     let subscriber = registry()
-        .with(fmt::layer()
-            .with_test_writer()
-            .with_ansi(false) // Better for CI logs
-            .with_file(true)  // Include source code location
-            .with_line_number(true))
-        .with(EnvFilter::from_default_env()
-            .add_directive(Level::TRACE.into()));
+        .with(
+            fmt::layer()
+                .with_test_writer()
+                .with_ansi(false) // Better for CI logs
+                .with_file(true) // Include source code location
+                .with_line_number(true),
+        )
+        .with(EnvFilter::from_default_env().add_directive(Level::TRACE.into()));
 
     tracing::subscriber::set_global_default(subscriber).ok();
 
@@ -102,7 +101,7 @@ async fn test_multi_turn_conversation_with_tools() {
 
     // Create a chat with tools
     let mut chat = Chat::new(Claude::Sonnet35 {
-        version: Sonnet35Version::V2
+        version: Sonnet35Version::V2,
     })
     .with_system_prompt("You are a helpful AI assistant that can provide weather information.")
     .with_max_output_tokens(1000)
@@ -121,7 +120,7 @@ async fn test_multi_turn_conversation_with_tools() {
                 info!("Received first response: {:?}", content);
             }
             resp
-        },
+        }
         Err(e) => {
             warn!("Failed to get response: {}", e);
             if e.to_string().contains("missing field") {
@@ -134,14 +133,17 @@ async fn test_multi_turn_conversation_with_tools() {
     // The response should include a tool call for weather
     match &response {
         Message::Assistant { tool_calls, .. } => {
-            assert!(!tool_calls.is_empty(), "Expected tool calls in the response");
-        },
+            assert!(
+                !tool_calls.is_empty(),
+                "Expected tool calls in the response"
+            );
+        }
         _ => panic!("Expected assistant message"),
     }
 
     // Process tool calls
     let mut updated_chat = Chat::new(Claude::Sonnet35 {
-        version: Sonnet35Version::V2
+        version: Sonnet35Version::V2,
     })
     .with_system_prompt("You are a helpful AI assistant that can provide weather information.")
     .with_max_output_tokens(1000)
@@ -167,7 +169,7 @@ async fn test_multi_turn_conversation_with_tools() {
                 info!("Received follow-up response: {:?}", content);
             }
             resp
-        },
+        }
         Err(e) => {
             warn!("Failed to get follow-up response: {}", e);
             if e.to_string().contains("missing field") {
@@ -180,58 +182,73 @@ async fn test_multi_turn_conversation_with_tools() {
     // The follow-up response should also include a tool call
     match &follow_up_response {
         Message::Assistant { tool_calls, .. } => {
-            assert!(!tool_calls.is_empty(), "Expected tool calls in follow-up response");
-        },
+            assert!(
+                !tool_calls.is_empty(),
+                "Expected tool calls in follow-up response"
+            );
+        }
         _ => panic!("Expected assistant message"),
     }
 
     // Inspect the follow-up response content to verify it references New York
     let references_new_york = match &follow_up_response {
-        Message::Assistant { content, tool_calls, .. } => {
+        Message::Assistant {
+            content,
+            tool_calls,
+            ..
+        } => {
             match content {
                 Some(Content::Text(text)) => {
                     info!("Follow-up text response: {}", text);
                     text.contains("New York")
-                },
-                Some(Content::Parts(parts)) => {
-                    parts.iter().any(|part| match part {
-                        ContentPart::Text { text } => {
-                            info!("Follow-up part: {}", text);
-                            text.contains("New York")
-                        },
-                        _ => false,
-                    })
-                },
+                }
+                Some(Content::Parts(parts)) => parts.iter().any(|part| match part {
+                    ContentPart::Text { text } => {
+                        info!("Follow-up part: {}", text);
+                        text.contains("New York")
+                    }
+                    _ => false,
+                }),
                 None => {
                     // Check if tool call references New York if there's no content
-                    tool_calls.iter().any(|call| call.function.arguments.contains("New York"))
+                    tool_calls
+                        .iter()
+                        .any(|call| call.function.arguments.contains("New York"))
                 }
             }
-        },
+        }
         _ => panic!("Expected assistant message"),
     };
 
     // Alternative check in tool calls for New York reference
     let tool_calls_reference_new_york = match &follow_up_response {
-        Message::Assistant { tool_calls, .. } => {
-            tool_calls.iter().any(|call| {
-                info!("Follow-up tool call: {} - {}", call.function.name, call.function.arguments);
-                call.function.arguments.contains("New York")
-            })
-        },
+        Message::Assistant { tool_calls, .. } => tool_calls.iter().any(|call| {
+            info!(
+                "Follow-up tool call: {} - {}",
+                call.function.name, call.function.arguments
+            );
+            call.function.arguments.contains("New York")
+        }),
         _ => panic!("Expected assistant message"),
     };
 
-    assert!(references_new_york || tool_calls_reference_new_york,
-            "Follow-up response should reference New York");
+    assert!(
+        references_new_york || tool_calls_reference_new_york,
+        "Follow-up response should reference New York"
+    );
 
     // Check that the model remembered previous context - it shouldn't repeat the San Francisco weather
     // when we asked about New York
     let response_text = match &follow_up_response {
-        Message::Assistant { content: Some(Content::Text(text)), .. } => text.clone(),
+        Message::Assistant {
+            content: Some(Content::Text(text)),
+            ..
+        } => text.clone(),
         _ => String::new(),
     };
 
-    assert!(!response_text.contains("San Francisco"),
-        "Follow-up response should not repeat San Francisco weather");
+    assert!(
+        !response_text.contains("San Francisco"),
+        "Follow-up response should not repeat San Francisco weather"
+    );
 }

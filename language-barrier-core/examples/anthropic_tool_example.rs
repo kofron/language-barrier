@@ -4,8 +4,8 @@ use serde_json::Value;
 
 use language_barrier_core::message::{Content, Function, ToolCall};
 use language_barrier_core::{
-    provider::anthropic::AnthropicProvider, Chat, Claude, Message, Result, Tool, ToolCallView,
-    ToolDescription, Toolbox, TypedToolbox,
+    Chat, Claude, Message, Result, Tool, ToolCallView, ToolDefinition,
+    provider::anthropic::AnthropicProvider,
 };
 
 // Define a typed weather tool request
@@ -53,7 +53,7 @@ enum ExampleToolRequest {
 struct ExampleToolbox;
 
 impl Toolbox for ExampleToolbox {
-    fn describe(&self) -> Vec<ToolDescription> {
+    fn describe(&self) -> Vec<T> {
         // Create schema for WeatherRequest
         let weather_schema = schemars::schema_for!(WeatherRequest);
         let weather_schema_value = serde_json::to_value(weather_schema.schema).unwrap();
@@ -162,7 +162,9 @@ fn main() -> Result<()> {
 
     // In a real application, we would use the provider to send the request
     // Here we'll just show the tool descriptions that would be converted
-    println!("\nIf this were a real API call, these tool descriptions would be converted to Anthropic format:");
+    println!(
+        "\nIf this were a real API call, these tool descriptions would be converted to Anthropic format:"
+    );
     for desc in chat.tool_descriptions() {
         println!("- Converting tool '{}' to Anthropic format", desc.name);
     }
