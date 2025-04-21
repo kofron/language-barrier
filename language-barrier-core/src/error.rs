@@ -1,5 +1,33 @@
 use thiserror::Error;
 
+/// Errors that can occur when working with tools
+#[derive(Error, Debug)]
+pub enum ToolError {
+    /// Tool with the specified name was not found in the registry
+    #[error("Tool not found: {0}")]
+    NotFound(String),
+
+    /// Error generating JSON schema for tool
+    #[error("Failed to generate schema for tool '{0}': {1}")]
+    SchemaGenerationError(String, serde_json::Error),
+
+    /// Error parsing arguments for tool
+    #[error("Failed to parse arguments for tool '{0}': {1}")]
+    ArgumentParsingError(String, serde_json::Error),
+
+    /// Invalid arguments for tool
+    #[error("Invalid arguments for tool: {0}")]
+    InvalidArguments(String),
+
+    /// Tool execution encountered an error
+    #[error("Tool execution failed: {0}")]
+    ExecutionError(String),
+
+    /// Expected output type did not match actual output type
+    #[error("Type mismatch after execution for tool '{0}': Expected different output type")]
+    OutputTypeMismatch(String),
+}
+
 /// Represents errors that can occur in the language-barrier library
 #[derive(Error, Debug)]
 pub enum Error {
@@ -41,10 +69,18 @@ pub enum Error {
     /// Invalid tool parameter
     #[error("Invalid tool parameter: {0}")]
     InvalidToolParameter(String),
+    
+    /// Invalid tool arguments
+    #[error("Invalid tool arguments: {0}")]
+    InvalidToolArguments(String),
 
     /// Tool execution error
     #[error("Tool execution error: {0}")]
     ToolExecutionError(String),
+    
+    /// Tool-specific error
+    #[error("Tool error: {0}")]
+    Tool(#[from] ToolError),
 
     /// Provider feature not supported
     #[error("Provider feature not supported: {0}")]

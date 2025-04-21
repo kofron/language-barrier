@@ -1,9 +1,9 @@
 use dotenv::dotenv;
-use language_barrier::message::{Content, ContentPart, Message};
-use language_barrier::provider::anthropic::{AnthropicConfig, AnthropicProvider};
-use language_barrier::provider::gemini::{GeminiConfig, GeminiProvider};
-use language_barrier::provider::mistral::{MistralConfig, MistralProvider};
-use language_barrier::provider::openai::{OpenAIConfig, OpenAIProvider};
+use language_barrier_core::message::{Content, ContentPart, Message};
+use language_barrier_core::provider::anthropic::{AnthropicConfig, AnthropicProvider};
+use language_barrier_core::provider::gemini::{GeminiConfig, GeminiProvider};
+use language_barrier_core::provider::mistral::{MistralConfig, MistralProvider};
+use language_barrier_core::provider::openai::{OpenAIConfig, OpenAIProvider};
 use std::env;
 use tracing::Level;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*, registry};
@@ -54,7 +54,7 @@ pub fn get_openai_provider() -> Option<OpenAIProvider> {
 }
 
 /// Get a Gemini provider if API key is available
-pub fn get_gemini_provider() -> Option<GeminiProvider> {
+pub fn get_google_provider() -> Option<GeminiProvider> {
     dotenv().ok();
     match env::var("GEMINI_API_KEY") {
         Ok(key) if !key.is_empty() => Some(GeminiProvider::with_config(GeminiConfig {

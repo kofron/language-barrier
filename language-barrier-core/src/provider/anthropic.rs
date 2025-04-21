@@ -2,7 +2,7 @@ use crate::error::{Error, Result};
 use crate::message::{Content, ContentPart, Message};
 use crate::model::Sonnet35Version;
 use crate::provider::HTTPProvider;
-use crate::{Chat, Claude};
+use crate::{Chat, Claude, LlmToolInfo};
 use reqwest::{Method, Request, Url};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -45,7 +45,7 @@ impl AnthropicProvider {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::provider::anthropic::AnthropicProvider;
+    /// use language_barrier_core::provider::anthropic::AnthropicProvider;
     ///
     /// let provider = AnthropicProvider::new();
     /// ```
@@ -65,7 +65,7 @@ impl AnthropicProvider {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::provider::anthropic::{AnthropicProvider, AnthropicConfig};
+    /// use language_barrier_core::provider::anthropic::{AnthropicProvider, AnthropicConfig};
     ///
     /// let config = AnthropicConfig {
     ///     api_key: "your-api-key".to_string(),
@@ -199,7 +199,7 @@ impl HTTPProvider<Claude> for AnthropicProvider {
                     return Err(Error::Serialization(e));
                 }
             };
-            
+
             if let Some(error) = error_response.get("error") {
                 if let Some(message) = error.get("message") {
                     let error_message = message.as_str().unwrap_or("Unknown error");
@@ -207,9 +207,11 @@ impl HTTPProvider<Claude> for AnthropicProvider {
                     return Err(Error::ProviderUnavailable(error_message.to_string()));
                 }
             }
-            
+
             error!("Unknown error format in response: {}", raw_response_text);
-            return Err(Error::ProviderUnavailable("Unknown error from Anthropic API".to_string()));
+            return Err(Error::ProviderUnavailable(
+                "Unknown error from Anthropic API".to_string(),
+            ));
         }
 
         debug!("Deserializing response JSON");
@@ -301,30 +303,12 @@ impl AnthropicProvider {
         // Get model ID for the chat model
         let model_id = Self::id_for_model(chat.model).to_string();
         debug!("Using model ID: {}", model_id);
-        
-        // Convert tool descriptions if a toolbox is provided
-        let tools = if chat.has_toolbox() {
-            let tool_descriptions = chat.tool_descriptions();
-            debug!("Converting {} tool descriptions to Anthropic format", tool_descriptions.len());
-            
-            if tool_descriptions.is_empty() {
-                None
-            } else {
-                Some(
-                    tool_descriptions
-                        .into_iter()
-                        .map(|desc| AnthropicTool {
-                            name: desc.name,
-                            description: desc.description,
-                            input_schema: desc.parameters,
-                        })
-                        .collect()
-                )
-            }
-        } else {
-            debug!("No toolbox provided");
-            None
-        };
+
+        // Convert tool descriptions if a tool registry is provided
+        let tools = chat
+            .tools
+            .as_ref()
+            .map(|tools| tools.iter().map(AnthropicTool::from).collect());
 
         // Create the request
         debug!("Creating AnthropicRequest");
@@ -543,7 +527,11 @@ impl From<&Message> for AnthropicMessage {
                     .collect(),
                 None => vec![AnthropicContentPart::text(String::new())],
             },
-            Message::Tool { tool_call_id, content, .. } => {
+            Message::Tool {
+                tool_call_id,
+                content,
+                ..
+            } => {
                 // For tool messages, add a tool_result part
                 vec![AnthropicContentPart::ToolResult(AnthropicToolResponse {
                     type_field: "tool_result".to_string(),
@@ -660,10 +648,20 @@ impl From<&AnthropicResponse> for Message {
     }
 }
 
+impl From<&LlmToolInfo> for AnthropicTool {
+    fn from(value: &LlmToolInfo) -> Self {
+        AnthropicTool {
+            name: value.name.clone(),
+            description: value.description.clone(),
+            input_schema: value.parameters.clone(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     use crate::message::{Content, ContentPart, Message};
 
     #[test]
@@ -714,14 +712,14 @@ mod tests {
             }
             _ => panic!("Expected image content"),
         }
-        
+
         // Test tool message
         let msg = Message::tool("tool_call_123", "The weather is sunny.");
         let anthropic_msg = AnthropicMessage::from(&msg);
-        
+
         assert_eq!(anthropic_msg.role, "user");
         assert_eq!(anthropic_msg.content.len(), 1);
-        
+
         // Verify tool content
         match &anthropic_msg.content[0] {
             AnthropicContentPart::ToolResult(tool_result) => {
@@ -755,7 +753,11 @@ mod tests {
 
         // Check the message is an Assistant variant
         match &msg {
-            Message::Assistant { content, tool_calls, .. } => {
+            Message::Assistant {
+                content,
+                tool_calls,
+                ..
+            } => {
                 // Verify content
                 match content {
                     Some(Content::Text(text)) => assert_eq!(text, "I'm Claude, an AI assistant."),
@@ -805,7 +807,11 @@ mod tests {
 
         // Check the message is an Assistant variant
         match &msg {
-            Message::Assistant { content, tool_calls, .. } => {
+            Message::Assistant {
+                content,
+                tool_calls,
+                ..
+            } => {
                 // Verify content
                 match content {
                     Some(Content::Text(text)) => {
@@ -814,29 +820,32 @@ mod tests {
                     Some(Content::Parts(parts)) => {
                         assert_eq!(parts.len(), 1);
                         match &parts[0] {
-                            ContentPart::Text { text } => assert_eq!(text, "Here's the information:"),
+                            ContentPart::Text { text } => {
+                                assert_eq!(text, "Here's the information:")
+                            }
                             _ => panic!("Expected text content"),
                         }
                     }
                     _ => panic!("Expected content"),
                 }
-                
+
                 // Verify tool calls
                 assert_eq!(tool_calls.len(), 1);
-                
+
                 let tool_call = &tool_calls[0];
                 assert_eq!(tool_call.id, "tool_123");
                 assert_eq!(tool_call.tool_type, "function");
                 assert_eq!(tool_call.function.name, "get_weather");
-                
+
                 // Parse the arguments JSON to verify it
-                let arguments: serde_json::Value = serde_json::from_str(&tool_call.function.arguments).unwrap();
+                let arguments: serde_json::Value =
+                    serde_json::from_str(&tool_call.function.arguments).unwrap();
                 assert_eq!(arguments["location"], "San Francisco");
             }
             _ => panic!("Expected Assistant variant"),
         }
     }
-    
+
     #[test]
     fn test_anthropic_response_with_tool_use_only() {
         // Test response with only tool use (no text)
@@ -846,15 +855,13 @@ mod tests {
             role: "assistant".to_string(),
             model: "claude-3-opus-20240229".to_string(),
             stop_reason: Some("end_turn".to_string()),
-            content: vec![
-                AnthropicResponseContent::ToolUse {
-                    id: "tool_xyz".to_string(),
-                    name: "calculate".to_string(),
-                    input: serde_json::json!({
-                        "expression": "2+2",
-                    }),
-                },
-            ],
+            content: vec![AnthropicResponseContent::ToolUse {
+                id: "tool_xyz".to_string(),
+                name: "calculate".to_string(),
+                input: serde_json::json!({
+                    "expression": "2+2",
+                }),
+            }],
             usage: AnthropicUsage {
                 input_tokens: 5,
                 output_tokens: 10,
@@ -865,23 +872,30 @@ mod tests {
 
         // Check the message is an Assistant variant
         match &msg {
-            Message::Assistant { content, tool_calls, .. } => {
+            Message::Assistant {
+                content,
+                tool_calls,
+                ..
+            } => {
                 // Content should be None since there's no text
-                assert!(content.is_none() || 
-                       (match content {
-                           Some(Content::Parts(parts)) => parts.is_empty(),
-                           _ => false,
-                       }));
-                
+                assert!(
+                    content.is_none()
+                        || (match content {
+                            Some(Content::Parts(parts)) => parts.is_empty(),
+                            _ => false,
+                        })
+                );
+
                 // Verify tool calls
                 assert_eq!(tool_calls.len(), 1);
-                
+
                 let tool_call = &tool_calls[0];
                 assert_eq!(tool_call.id, "tool_xyz");
                 assert_eq!(tool_call.function.name, "calculate");
-                
+
                 // Parse the arguments JSON to verify it
-                let arguments: serde_json::Value = serde_json::from_str(&tool_call.function.arguments).unwrap();
+                let arguments: serde_json::Value =
+                    serde_json::from_str(&tool_call.function.arguments).unwrap();
                 assert_eq!(arguments["expression"], "2+2");
             }
             _ => panic!("Expected Assistant variant"),
@@ -925,16 +939,20 @@ mod tests {
 
         // Verify the conversion
         match &lib_msg {
-            Message::Assistant { content, tool_calls, metadata } => {
+            Message::Assistant {
+                content,
+                tool_calls,
+                metadata,
+            } => {
                 // Verify content
                 match content {
                     Some(Content::Text(text)) => assert_eq!(text, "I'm here to help!"),
                     _ => panic!("Expected text content"),
                 }
-                
+
                 // Verify no tool calls
                 assert!(tool_calls.is_empty());
-                
+
                 // Check metadata
                 assert_eq!(metadata["input_tokens"], 5);
                 assert_eq!(metadata["output_tokens"], 15);
@@ -960,14 +978,12 @@ mod tests {
         let model = Claude::Sonnet37 {
             use_extended_thinking: false,
         };
-        let mut chat = Chat::new(model)
+        let chat = Chat::new(model)
             .with_system_prompt("You are a helpful assistant.")
-            .with_max_output_tokens(1024);
-
-        // Add some messages
-        chat.push_message(Message::user("Hello, how are you?"));
-        chat.push_message(Message::assistant("I'm doing well, thank you for asking!"));
-        chat.push_message(Message::user("Can you help me with a question?"));
+            .with_max_output_tokens(1024)
+            .add_message(Message::user("Hello, how are you?"))
+            .add_message(Message::assistant("I'm doing well, thank you for asking!"))
+            .add_message(Message::user("Can you help me with a question?"));
 
         // Create the request
         let request = provider.accept(chat).unwrap();

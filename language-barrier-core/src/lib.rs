@@ -15,10 +15,10 @@ pub mod tool;
 // Re-export the main types for convenient usage
 pub use chat::Chat;
 pub use compactor::{ChatHistoryCompactor, DropOldestCompactor};
-pub use error::{Error, Result};
+pub use error::{Error, Result, ToolError};
 pub use executor::SingleRequestExecutor;
 pub use message::{Content, Message, ToolCall};
 pub use model::{Claude, GPT, Gemini, Mistral, ModelInfo};
 pub use secret::Secret;
 pub use token::TokenCounter;
-pub use tool::{Tool, ToolCallView, ToolDescription, Toolbox, TypedToolbox};
+pub use tool::{LlmToolInfo, Tool, ToolDefinition};

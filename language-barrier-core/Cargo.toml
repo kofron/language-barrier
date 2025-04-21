@@ -1,0 +1,26 @@
+[package]
+name = "language-barrier-core"
+version = { workspace = true }
+edition = { workspace = true }
+description = "A Rust library providing abstractions for Large Language Models"
+license = { workspace = true }
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true }
+regex = { workspace = true }
+schemars = { workspace = true }
+url = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+dotenv = { workspace = true }
+hyper = { workspace = true }
+tracing-test = { workspace = true }
+parameterized = { workspace = true }

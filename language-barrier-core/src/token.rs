@@ -7,7 +7,7 @@
 /// # Examples
 ///
 /// ```
-/// use language_barrier::TokenCounter;
+/// use language_barrier_core::TokenCounter;
 ///
 /// let mut counter = TokenCounter::default();
 /// counter.observe("Hello, world!");
@@ -29,7 +29,7 @@ impl TokenCounter {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::TokenCounter;
+    /// use language_barrier_core::TokenCounter;
     ///
     /// let counter = TokenCounter::new();
     /// assert_eq!(counter.total(), 0);
@@ -47,7 +47,7 @@ impl TokenCounter {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::TokenCounter;
+    /// use language_barrier_core::TokenCounter;
     ///
     /// assert_eq!(TokenCounter::count_tokens("Hello, world!"), 2);
     /// assert_eq!(TokenCounter::count_tokens("one two three four"), 4);
@@ -62,7 +62,7 @@ impl TokenCounter {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::TokenCounter;
+    /// use language_barrier_core::TokenCounter;
     ///
     /// let mut counter = TokenCounter::default();
     /// counter.observe("Hello, world!");
@@ -79,7 +79,7 @@ impl TokenCounter {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::TokenCounter;
+    /// use language_barrier_core::TokenCounter;
     ///
     /// let mut counter = TokenCounter::default();
     /// counter.observe("Hello, world!");
@@ -99,7 +99,7 @@ impl TokenCounter {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::TokenCounter;
+    /// use language_barrier_core::TokenCounter;
     ///
     /// let mut counter = TokenCounter::default();
     /// counter.observe("Hello, world!");
@@ -115,7 +115,7 @@ impl TokenCounter {
     /// # Examples
     ///
     /// ```
-    /// use language_barrier::TokenCounter;
+    /// use language_barrier_core::TokenCounter;
     ///
     /// let mut counter = TokenCounter::default();
     /// counter.observe("Hello, world!");
@@ -174,7 +174,7 @@ mod tests {
     fn test_under_budget() {
         let mut counter = TokenCounter::default();
         counter.observe("Hello world");
-        
+
         assert!(counter.under_budget(2));
         assert!(counter.under_budget(3));
         assert!(!counter.under_budget(1));
