@@ -1,6 +1,6 @@
 use language_barrier_core::{ModelInfo, SingleRequestExecutor};
 
-use language_barrier_core::model::{Claude, GPT, Gemini, Mistral, Sonnet35Version};
+use language_barrier_core::model::{Claude, GPT, Mistral, Sonnet35Version};
 use language_barrier_core::{Chat, Message};
 use parameterized::*;
 use test_tools::WeatherTool;
@@ -11,7 +11,7 @@ mod test_tools;
 mod test_utils;
 
 use test_utils::{
-    get_anthropic_provider, get_google_provider, get_mistral_provider, get_openai_provider,
+    get_anthropic_provider, get_mistral_provider, get_openai_provider,
     setup_tracing,
 };
 
@@ -48,9 +48,9 @@ async fn test_tool_anthropic_weather(test_case: Claude) {
     // Generate the request
     let executor = SingleRequestExecutor::new(provider);
     if let Ok(Message::Assistant { tool_calls, .. }) = executor.send(chat).await {
-        assert_eq!(tool_calls.is_empty(), false)
+        assert!(!tool_calls.is_empty())
     } else {
-        assert!(false);
+        panic!("Expected assistant message with tool calls");
     }
 }
 
@@ -75,9 +75,9 @@ async fn test_tool_openai_weather(test_case: GPT) {
     // Generate the request
     let executor = SingleRequestExecutor::new(provider);
     if let Ok(Message::Assistant { tool_calls, .. }) = executor.send(chat).await {
-        assert_eq!(tool_calls.is_empty(), false)
+        assert!(!tool_calls.is_empty())
     } else {
-        assert!(false);
+        panic!("Expected assistant message with tool calls");
     }
 }
 
@@ -102,19 +102,14 @@ async fn test_tool_mistral_weather(test_case: Mistral) {
     // Generate the request
     let executor = SingleRequestExecutor::new(provider);
     if let Ok(Message::Assistant { tool_calls, .. }) = executor.send(chat).await {
-        assert_eq!(tool_calls.is_empty(), false)
+        assert!(!tool_calls.is_empty())
     } else {
-        assert!(false);
+        panic!("Expected assistant message with tool calls");
     }
 }
 
-#[parameterized(
-    test_case = {
-        Gemini::Flash20
-    }
-)]
-#[parameterized_macro(tokio::test)]
-async fn test_tool_gemini_weather(test_case: Gemini) {
+#[tokio::test]
+async fn test_tool_gemini_weather() {
     setup_tracing(Level::DEBUG);
 
     // Skip test due to known issues with Gemini's handling of JSON schema

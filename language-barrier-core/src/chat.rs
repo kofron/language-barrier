@@ -188,8 +188,8 @@ where
         self.token_counter.total()
     }
 
-    /// Add a tool and returns a new instance
-    #[must_use]
+    /// Add a tool and returns a new instance with the tool added
+    #[must_use = "This returns a new Chat with the tool added"]
     pub fn with_tool(self, tool: impl ToolDefinition) -> Result<Self> {
         let info = LlmToolInfo {
             name: tool.name(),

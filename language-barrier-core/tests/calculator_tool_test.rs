@@ -48,9 +48,9 @@ async fn test_tool_anthropic_calculator(test_case: Claude) {
     // Generate the request
     let executor = SingleRequestExecutor::new(provider);
     if let Ok(Message::Assistant { tool_calls, .. }) = executor.send(chat).await {
-        assert_eq!(tool_calls.is_empty(), false)
+        assert!(!tool_calls.is_empty())
     } else {
-        assert!(false);
+        panic!("Expected assistant message with tool calls");
     }
 }
 
@@ -75,9 +75,9 @@ async fn test_tool_openai_calculator(test_case: GPT) {
     // Generate the request
     let executor = SingleRequestExecutor::new(provider);
     if let Ok(Message::Assistant { tool_calls, .. }) = executor.send(chat).await {
-        assert_eq!(tool_calls.is_empty(), false)
+        assert!(!tool_calls.is_empty())
     } else {
-        assert!(false);
+        panic!("Expected assistant message with tool calls");
     }
 }
 
@@ -106,14 +106,14 @@ async fn test_tool_gemini_calculator(test_case: Gemini) {
     // Just swallow any errors and count the test as passed
     match executor.send(chat).await {
         Ok(Message::Assistant { tool_calls, .. }) => {
-            assert_eq!(tool_calls.is_empty(), false)
+            assert!(!tool_calls.is_empty())
         }
         Err(e) => {
             // Log the error but don't fail the test
             info!("Gemini test had an expected error: {}", e);
         }
         _ => {
-            assert!(false, "Expected assistant message");
+            panic!("Expected assistant message");
         }
     }
 }
@@ -139,8 +139,8 @@ async fn test_tool_mistral_calculator(test_case: Mistral) {
     // Generate the request
     let executor = SingleRequestExecutor::new(provider);
     if let Ok(Message::Assistant { tool_calls, .. }) = executor.send(chat).await {
-        assert_eq!(tool_calls.is_empty(), false)
+        assert!(!tool_calls.is_empty())
     } else {
-        assert!(false);
+        panic!("Expected assistant message with tool calls");
     }
 }

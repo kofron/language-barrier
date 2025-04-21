@@ -1,9 +1,8 @@
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
-use std::collections::HashMap;
 
-use crate::error::{Result, ToolError};
+use crate::error::Result;
 
 /// Defines the contract for tools that can be used by LLMs
 ///

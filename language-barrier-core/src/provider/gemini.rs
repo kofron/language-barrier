@@ -366,7 +366,7 @@ impl GeminiProvider {
             vec![GeminiTool {
                 function_declarations: tools
                     .iter()
-                    .map(|t| GeminiFunctionDeclaration::from(t))
+                    .map(GeminiFunctionDeclaration::from)
                     .collect(),
             }]
         });
@@ -482,11 +482,11 @@ pub(crate) struct GeminiFunctionDeclaration {
 
 impl From<&LlmToolInfo> for GeminiFunctionDeclaration {
     fn from(value: &LlmToolInfo) -> Self {
-        return GeminiFunctionDeclaration {
+        GeminiFunctionDeclaration {
             name: value.name.clone(),
             description: value.description.clone(),
             parameters: value.parameters.clone(),
-        };
+        }
     }
 }
 

@@ -1,4 +1,4 @@
-use language_barrier_core::{ModelInfo, SingleRequestExecutor};
+use language_barrier_core::SingleRequestExecutor;
 use language_barrier_core::model::{Claude, Sonnet35Version};
 use language_barrier_core::{Chat, Message};
 use tracing::{Level, info};
@@ -39,7 +39,7 @@ async fn test_multi_turn_conversation_with_tools() {
     if let Ok(Message::Assistant { tool_calls, .. }) = executor.send(chat_sf).await {
         assert!(!tool_calls.is_empty(), "Expected tool calls for San Francisco");
     } else {
-        assert!(false, "Expected assistant message for San Francisco");
+        panic!("Expected assistant message for San Francisco");
     }
 
     // Create a new chat for New York weather
@@ -60,6 +60,6 @@ async fn test_multi_turn_conversation_with_tools() {
         let references_ny = tool_calls.iter().any(|call| call.function.arguments.contains("New York"));
         assert!(references_ny, "Expected tool call to reference New York");
     } else {
-        assert!(false, "Expected assistant message for New York");
+        panic!("Expected assistant message for New York");
     }
 }

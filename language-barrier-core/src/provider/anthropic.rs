@@ -308,7 +308,7 @@ impl AnthropicProvider {
         let tools = chat
             .tools
             .as_ref()
-            .map(|tools| tools.iter().map(|t| AnthropicTool::from(t)).collect());
+            .map(|tools| tools.iter().map(AnthropicTool::from).collect());
 
         // Create the request
         debug!("Creating AnthropicRequest");

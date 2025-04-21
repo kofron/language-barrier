@@ -3,7 +3,7 @@ use language_barrier_core::SingleRequestExecutor;
 use language_barrier_core::model::{Claude, GPT, Gemini, Mistral, Sonnet35Version};
 use language_barrier_core::provider::HTTPProvider;
 use language_barrier_core::provider::anthropic::{AnthropicConfig, AnthropicProvider};
-use language_barrier_core::provider::gemini::{GeminiConfig, GeminiProvider};
+use language_barrier_core::provider::gemini::GeminiProvider;
 use language_barrier_core::provider::mistral::{MistralConfig, MistralProvider};
 use language_barrier_core::provider::openai::{OpenAIConfig, OpenAIProvider};
 use language_barrier_core::{Chat, Message};

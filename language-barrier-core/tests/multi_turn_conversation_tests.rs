@@ -1,5 +1,5 @@
 use language_barrier_core::SingleRequestExecutor;
-use language_barrier_core::message::{Content, ContentPart, Function, ToolCall};
+use language_barrier_core::message::{Function, ToolCall};
 use language_barrier_core::model::{Claude, GPT, Gemini, Mistral, ModelInfo, Sonnet35Version};
 use language_barrier_core::provider::HTTPProvider;
 use language_barrier_core::{Chat, Message};
@@ -12,8 +12,8 @@ mod test_utils;
 
 use test_tools::WeatherTool;
 use test_utils::{
-    extract_text_content, get_anthropic_provider, get_google_provider, get_mistral_provider,
-    get_openai_provider, has_tool_calls, setup_tracing,
+    get_anthropic_provider, get_google_provider, get_mistral_provider,
+    get_openai_provider, setup_tracing,
 };
 
 /// Creates a chat for testing with the given model
@@ -64,13 +64,8 @@ async fn test_multi_turn_openai(test_case: GPT) {
     test_multi_turn_with_provider("OpenAI", test_case, provider).await;
 }
 
-#[parameterized(
-    test_case = {
-        Gemini::Flash20
-    }
-)]
-#[parameterized_macro(tokio::test)]
-async fn test_multi_turn_gemini(test_case: Gemini) {
+#[tokio::test]
+async fn test_multi_turn_gemini() {
     setup_tracing(Level::DEBUG);
 
     // Skip test due to known issues with Gemini's handling of JSON schema
@@ -119,8 +114,7 @@ where
     let first_response = match executor.send(chat_paris).await {
         Ok(response) => response,
         Err(e) => {
-            assert!(false, "First request failed: {}", e);
-            return;
+            panic!("First request failed: {}", e);
         }
     };
     
@@ -134,7 +128,7 @@ where
         let references_paris = tool_calls.iter().any(|call| call.function.arguments.contains("Paris"));
         assert!(references_paris, "Expected tool call to reference Paris");
     } else {
-        assert!(false, "Expected assistant message");
+        panic!("Expected assistant message");
     }
     
     // Test with London separately (without multi-turn conversation)
@@ -143,8 +137,7 @@ where
     let second_response = match executor.send(chat_london).await {
         Ok(response) => response,
         Err(e) => {
-            assert!(false, "Second request failed: {}", e);
-            return;
+            panic!("Second request failed: {}", e);
         }
     };
     
@@ -158,7 +151,7 @@ where
         let references_london = tool_calls.iter().any(|call| call.function.arguments.contains("London"));
         assert!(references_london, "Expected tool call to reference London");
     } else {
-        assert!(false, "Expected assistant message");
+        panic!("Expected assistant message");
     }
     
     info!("{} multi-turn conversation test successful", provider_name);
