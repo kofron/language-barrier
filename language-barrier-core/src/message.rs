@@ -383,6 +383,15 @@ impl Message {
         }
     }
 
+    /// Creates a new tool message from the tool call that originated it.
+    pub fn tool_from_call(tool_call: &ToolCall, content: impl Into<String>) -> Self {
+        Message::Tool {
+            tool_call_id: tool_call.id.clone(),
+            content: content.into(),
+            metadata: HashMap::new(),
+        }
+    }
+
     /// Returns the role of the message as a string
     ///
     /// # Examples

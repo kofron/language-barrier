@@ -978,14 +978,12 @@ mod tests {
         let model = Claude::Sonnet37 {
             use_extended_thinking: false,
         };
-        let mut chat = Chat::new(model)
+        let chat = Chat::new(model)
             .with_system_prompt("You are a helpful assistant.")
-            .with_max_output_tokens(1024);
-
-        // Add some messages
-        chat.push_message(Message::user("Hello, how are you?"));
-        chat.push_message(Message::assistant("I'm doing well, thank you for asking!"));
-        chat.push_message(Message::user("Can you help me with a question?"));
+            .with_max_output_tokens(1024)
+            .add_message(Message::user("Hello, how are you?"))
+            .add_message(Message::assistant("I'm doing well, thank you for asking!"))
+            .add_message(Message::user("Can you help me with a question?"));
 
         // Create the request
         let request = provider.accept(chat).unwrap();

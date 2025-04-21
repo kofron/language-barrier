@@ -333,7 +333,7 @@ pub(crate) struct MistralFunction {
 impl From<&LlmToolInfo> for MistralTool {
     fn from(value: &LlmToolInfo) -> Self {
         MistralTool {
-            r#type: "function".to_string(),
+            tool_type: "function".to_string(),
             function: MistralFunction {
                 name: value.name.clone(),
                 description: value.description.clone(),
@@ -347,7 +347,8 @@ impl From<&LlmToolInfo> for MistralTool {
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct MistralTool {
     /// The type of the tool (currently always "function")
-    pub r#type: String,
+    #[serde(rename = "type")]
+    pub tool_type: String,
     /// The function definition
     pub function: MistralFunction,
 }
@@ -366,8 +367,6 @@ pub(crate) struct MistralFunctionCall {
 pub(crate) struct MistralToolCall {
     /// The ID of the tool call
     pub id: String,
-    /// The type of the tool (currently always "function")
-    pub r#type: String,
     /// The function call
     pub function: MistralFunctionCall,
 }
@@ -523,7 +522,6 @@ impl From<&Message> for MistralMessage {
                     for tc in tool_calls {
                         calls.push(MistralToolCall {
                             id: tc.id.clone(),
-                            r#type: tc.tool_type.clone(),
                             function: MistralFunctionCall {
                                 name: tc.function.name.clone(),
                                 arguments: tc.function.arguments.clone(),
@@ -579,7 +577,7 @@ impl From<&MistralResponse> for Message {
                         for call in mistral_tool_calls {
                             let tool_call = crate::message::ToolCall {
                                 id: call.id.clone(),
-                                tool_type: call.r#type.clone(),
+                                tool_type: "function".to_string(),
                                 function: crate::message::Function {
                                     name: call.function.name.clone(),
                                     arguments: call.function.arguments.clone(),
