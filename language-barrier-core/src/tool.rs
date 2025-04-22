@@ -128,3 +128,62 @@ pub struct LlmToolInfo {
     pub description: String,
     pub parameters: Value,
 }
+
+/// Represents the tool choice strategy for LLMs
+///
+/// This enum provides a provider-agnostic API for tool choice, mapping to
+/// different provider-specific parameters:
+///
+/// - OpenAI/Mistral: Maps to "auto", "required", "none", or a function object
+/// - Anthropic: Maps to "auto", "any", "none", or a function object
+/// - Gemini: Maps to function_calling_config modes and allowed_function_names
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolChoice {
+    /// Allow the model to choose which tool to use (or none)
+    /// 
+    /// - OpenAI/Mistral: "auto"
+    /// - Anthropic: "auto"
+    /// - Gemini: mode="auto"
+    Auto,
+    /// Require the model to use one of the available tools
+    /// 
+    /// - OpenAI/Mistral: "required"
+    /// - Anthropic: "any"
+    /// - Gemini: mode="any"
+    Any,
+    /// Force the model not to use any tools
+    /// 
+    /// - OpenAI/Mistral: "none"
+    /// - Anthropic: "none"
+    /// - Gemini: mode="none"
+    None,
+    /// Require the model to use a specific tool by name
+    /// 
+    /// - OpenAI/Mistral: Object with type="function" and function.name
+    /// - Anthropic: Object with type="function" and function.name
+    /// - Gemini: mode="auto" with allowed_function_names=[name]
+    Specific(String),
+}
+
+impl Default for ToolChoice {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_tool_choice_default() {
+        let choice = ToolChoice::default();
+        assert_eq!(choice, ToolChoice::Auto);
+    }
+    
+    #[test]
+    fn test_tool_choice_specific() {
+        let choice = ToolChoice::Specific("weather".to_string());
+        assert!(matches!(choice, ToolChoice::Specific(name) if name == "weather"));
+    }
+}

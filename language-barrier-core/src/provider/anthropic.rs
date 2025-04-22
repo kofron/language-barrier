@@ -309,6 +309,31 @@ impl AnthropicProvider {
             .tools
             .as_ref()
             .map(|tools| tools.iter().map(AnthropicTool::from).collect());
+        
+        // Note: For Anthropic, tool_choice is handled through the prompt and context
+        // We don't modify the tools list based on the choice
+
+        // Convert tool_choice to Anthropic's format
+        let tool_choice = if let Some(choice) = &chat.tool_choice {
+            match choice {
+                crate::tool::ToolChoice::Auto => Some(serde_json::json!("auto")),
+                // Anthropic uses "any" instead of "required" for what we call "Any"
+                crate::tool::ToolChoice::Any => Some(serde_json::json!("any")),
+                crate::tool::ToolChoice::None => Some(serde_json::json!("none")),
+                crate::tool::ToolChoice::Specific(name) => {
+                    // For specific tool, use this format
+                    Some(serde_json::json!({
+                        "type": "function",
+                        "function": { "name": name }
+                    }))
+                }
+            }
+        } else if tools.is_some() {
+            // Default to auto if tools are present but no choice specified
+            Some(serde_json::json!("auto"))
+        } else {
+            None
+        };
 
         // Create the request
         debug!("Creating AnthropicRequest");
@@ -321,6 +346,7 @@ impl AnthropicProvider {
             top_p: None,
             top_k: None,
             tools,
+            tool_choice,
         };
 
         info!("Request payload created successfully");
@@ -437,6 +463,9 @@ pub(crate) struct AnthropicRequest {
     /// The tools available to the model
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<AnthropicTool>>,
+    /// Tool choice mode
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<serde_json::Value>,
 }
 
 /// Represents a response from the Anthropic API

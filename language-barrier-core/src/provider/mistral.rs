@@ -275,8 +275,26 @@ impl MistralProvider {
             .map(|tools| tools.iter().map(MistralTool::from).collect());
 
         // Create the tool choice setting
-        let tool_choice = if tools.is_some() {
-            Some("auto".to_string())
+        let tool_choice = if let Some(choice) = &chat.tool_choice {
+            // Use the explicitly configured choice
+            match choice {
+                crate::tool::ToolChoice::Auto => Some(serde_json::json!("auto")),
+                // Mistral uses "required" for what we call "Any" (following OpenAI's convention)
+                crate::tool::ToolChoice::Any => Some(serde_json::json!("required")),
+                crate::tool::ToolChoice::None => Some(serde_json::json!("none")),
+                crate::tool::ToolChoice::Specific(name) => {
+                    // For specific tool, we need to create an object with type and function properties
+                    Some(serde_json::json!({
+                        "type": "function",
+                        "function": {
+                            "name": name
+                        }
+                    }))
+                }
+            }
+        } else if tools.is_some() {
+            // Default to auto if tools are present but no choice specified
+            Some(serde_json::json!("auto"))
         } else {
             None
         };
@@ -401,7 +419,7 @@ pub(crate) struct MistralRequest {
     pub tools: Option<Vec<MistralTool>>,
     /// Tool choice strategy (auto, none, or a specific tool)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_choice: Option<String>,
+    pub tool_choice: Option<serde_json::Value>,
 }
 
 /// Represents a response from the Mistral API

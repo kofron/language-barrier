@@ -81,13 +81,14 @@ impl crate::provider::gemini::GeminiModelInfo for Gemini {
             Self::Flash20 => "gemini-2.0-flash",
             Self::Flash20Lite => "gemini-2.0-flash-lite",
             Self::Flash25Preview => "gemini-2.5-flash-preview-04-17",
-        }.to_string()
+        }
+        .to_string()
     }
 }
 
 /// Represents an `OpenAI` GPT model
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GPT {
+pub enum OpenAi {
     /// GPT-4o model
     GPT4o,
     /// GPT-4o-mini model
@@ -96,32 +97,50 @@ pub enum GPT {
     GPT4Turbo,
     /// GPT-3.5 Turbo model
     GPT35Turbo,
+    /// O1
+    O1,
+    O1Mini,
+    O1Pro,
+    /// O3
+    O3,
+    O3Mini,
+    O4Mini,
 }
 
-impl ModelInfo for GPT {
+impl ModelInfo for OpenAi {
     fn context_window(&self) -> usize {
         match self {
-            Self::GPT4o | Self::GPT4oMini | Self::GPT4Turbo => 128_000,
+            Self::O1Mini | Self::GPT4o | Self::GPT4oMini | Self::GPT4Turbo => 128_000,
             Self::GPT35Turbo => 16_000,
+            _ => 200_000,
         }
     }
 
     fn max_output_tokens(&self) -> usize {
         match self {
             Self::GPT4o | Self::GPT4oMini | Self::GPT4Turbo | Self::GPT35Turbo => 4_096,
+            Self::O1Mini => 65_536,
+            _ => 100_000,
         }
     }
 }
 
 // Implement the OpenAIModelInfo trait from provider/openai.rs
-impl crate::provider::openai::OpenAIModelInfo for GPT {
+impl crate::provider::openai::OpenAIModelInfo for OpenAi {
     fn openai_model_id(&self) -> String {
         match self {
             Self::GPT4o => "gpt-4o",
             Self::GPT4oMini => "gpt-4o-mini",
             Self::GPT4Turbo => "gpt-4-turbo",
             Self::GPT35Turbo => "gpt-3.5-turbo",
-        }.to_string()
+            Self::O4Mini => "o4-mini-2025-04-16",
+            Self::O3 => "o3-2025-04-16",
+            Self::O3Mini => "o3-mini-2025-01-31",
+            Self::O1 => "o1-2024-12-17",
+            Self::O1Mini => "o1-mini-2024-09-12",
+            Self::O1Pro => "o1-pro-2025-03-19",
+        }
+        .to_string()
     }
 }
 
@@ -143,9 +162,9 @@ pub enum Mistral {
 impl ModelInfo for Mistral {
     fn context_window(&self) -> usize {
         match self {
-            Self::Large | Self::Small | Self::Nemo => 131_072,  // 131k
-            Self::Codestral => 262_144, // 256k
-            Self::Embed => 8_192,    // 8k
+            Self::Large | Self::Small | Self::Nemo => 131_072, // 131k
+            Self::Codestral => 262_144,                        // 256k
+            Self::Embed => 8_192,                              // 8k
         }
     }
 
@@ -164,6 +183,7 @@ impl crate::provider::mistral::MistralModelInfo for Mistral {
             Self::Nemo => "open-mistral-nemo",
             Self::Codestral => "codestral-latest",
             Self::Embed => "mistral-embed",
-        }.to_string()
+        }
+        .to_string()
     }
 }

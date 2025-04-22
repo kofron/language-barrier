@@ -950,6 +950,44 @@ The tool runtime implementation provides a full execution layer for the type-saf
 
 The implementation completes the tool system by providing a flexible runtime layer that complements the core type definitions.
 
+#### 2025-04-21: Tool Choice Implementation
+
+1. **Tool Choice Configuration**:
+   - Added `ToolChoice` enum to represent different tool selection strategies
+   - Implemented support for Auto, Any, None, and Specific tool choices
+   - Extended the `Chat` struct with an optional `tool_choice` field
+   - Added builder methods `with_tool_choice` and `without_tool_choice`
+   - Maintained backward compatibility with default behavior
+
+2. **Provider-Specific Implementations**:
+   - **OpenAI**: 
+      - Maps to `tool_choice` with values "auto", "required", "none", or a function object
+      - Handles model-specific parameters (e.g., "o-" series models use `max_completion_tokens` instead of `max_tokens`)
+   - **Mistral**: Maps to `tool_choice` with values "auto", "required", "none", or a function object
+   - **Anthropic**: Maps to `tool_choice` with values "auto", "any", "none", or a function object
+   - **Gemini**: Maps to `tool_config.function_calling_config` with mode and allowed_function_names
+   - Used consistent user-facing API patterns across all providers despite provider terminology differences
+   - Each provider implementation handles the correct format and terminology for its specific API
+   - All providers correctly handle defaults when tool_choice isn't specified
+
+3. **Benefits of the Implementation**:
+   - **Finer control**: Applications can now control how models use tools
+   - **Provider-agnostic API**: Same configuration works across all providers
+   - **Default behavior**: Auto-mode remains the default for backward compatibility
+   - **Clean interface**: Simple, builder-style methods for configuration
+
+4. **Use Cases Supported**:
+   - Force a model to use a specific tool
+   - Require the model to use any tool
+   - Prevent the model from using tools even when they're available
+   - Let the model decide whether to use tools (default)
+
+This implementation follows our core design principles:
+- **Provider-agnostic API**: The same tool choice configuration works across all LLM providers
+- **Type safety**: The `ToolChoice` enum provides type-safe configuration
+- **Extensibility**: The approach allows for future expansion of tool choice strategies
+- **Backward compatibility**: Existing code continues to work as before
+
 ## Future Directions
 
 1. **Streaming**: Support for streaming responses from LLMs.

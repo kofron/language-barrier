@@ -1,7 +1,7 @@
 use crate::compactor::{ChatHistoryCompactor, DropOldestCompactor};
 use crate::message::{Content, Message};
 use crate::token::TokenCounter;
-use crate::tool::LlmToolInfo;
+use crate::tool::{LlmToolInfo, ToolChoice};
 use crate::{ModelInfo, Result, ToolDefinition};
 
 /// The main Chat client that users will interact with.
@@ -23,6 +23,9 @@ pub struct Chat<M: ModelInfo> {
 
     // Registry for type-safe tool definitions (optional)
     pub tools: Option<Vec<LlmToolInfo>>,
+    
+    // Tool execution settings
+    pub tool_choice: Option<ToolChoice>,
 }
 
 impl<M> Chat<M>
@@ -39,6 +42,7 @@ where
             token_counter: TokenCounter::default(),
             compactor: Box::<DropOldestCompactor>::default(),
             tools: None,
+            tool_choice: None,
         }
     }
 
@@ -211,5 +215,58 @@ where
         };
 
         Ok(new_chat)
+    }
+
+    /// Sets the tool choice strategy and returns a new instance
+    ///
+    /// This method allows configuring how the model should choose tools:
+    /// - `ToolChoice::Auto` - Model can choose whether to use a tool (default)
+    /// - `ToolChoice::Any` - Model must use one of the available tools
+    /// - `ToolChoice::None` - Model must not use any tools
+    /// - `ToolChoice::Specific(name)` - Model must use the specified tool
+    ///
+    /// Different providers implement this with slightly different terminology:
+    /// - OpenAI/Mistral use "auto", "required", "none"
+    /// - Anthropic uses "auto", "any", "none"
+    /// - Gemini uses function_calling_config with modes
+    ///
+    /// The library transparently handles these differences, providing a
+    /// consistent API regardless of which provider you're using.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use language_barrier_core::{Chat, tool::ToolChoice};
+    /// use language_barrier_core::model::Claude;
+    ///
+    /// // Require using a tool
+    /// let chat = Chat::new(Claude::Opus3)
+    ///     .with_tool_choice(ToolChoice::Any);
+    ///
+    /// // Specify a tool by name
+    /// let chat = Chat::new(Claude::Opus3)
+    ///     .with_tool_choice(ToolChoice::Specific("weather_tool".to_string()));
+    ///
+    /// // Disable tools for this conversation
+    /// let chat = Chat::new(Claude::Opus3)
+    ///     .with_tool_choice(ToolChoice::None);
+    /// ```
+    #[must_use]
+    pub fn with_tool_choice(self, choice: ToolChoice) -> Self {
+        Self {
+            tool_choice: Some(choice),
+            ..self
+        }
+    }
+
+    /// Removes tool choice configuration and returns a new instance
+    ///
+    /// This resets to the default behavior, where the model can choose whether to use tools.
+    #[must_use]
+    pub fn without_tool_choice(self) -> Self {
+        Self {
+            tool_choice: None,
+            ..self
+        }
     }
 }

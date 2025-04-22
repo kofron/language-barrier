@@ -1,10 +1,10 @@
 use language_barrier_core::SingleRequestExecutor;
 use language_barrier_core::message::{Function, ToolCall};
-use language_barrier_core::model::{Claude, GPT, Gemini, Mistral, ModelInfo, Sonnet35Version};
+use language_barrier_core::model::{Claude, Gemini, Mistral, ModelInfo, OpenAi, Sonnet35Version};
 use language_barrier_core::provider::HTTPProvider;
 use language_barrier_core::{Chat, Message};
-use tracing::{Level, info};
 use parameterized::*;
+use tracing::{Level, info};
 
 // Import our helper modules
 mod test_tools;
@@ -12,8 +12,8 @@ mod test_utils;
 
 use test_tools::WeatherTool;
 use test_utils::{
-    get_anthropic_provider, get_google_provider, get_mistral_provider,
-    get_openai_provider, setup_tracing,
+    get_anthropic_provider, get_google_provider, get_mistral_provider, get_openai_provider,
+    setup_tracing,
 };
 
 /// Creates a chat for testing with the given model
@@ -48,11 +48,11 @@ async fn test_multi_turn_anthropic(test_case: Claude) {
 
 #[parameterized(
     test_case = {
-        GPT::GPT4o
+        OpenAi::GPT4o
     }
 )]
 #[parameterized_macro(tokio::test)]
-async fn test_multi_turn_openai(test_case: GPT) {
+async fn test_multi_turn_openai(test_case: OpenAi) {
     setup_tracing(Level::DEBUG);
 
     // Skip test if no API key is available
@@ -110,50 +110,60 @@ where
     // Test with Paris
     let chat_paris = chat_for_model(model.clone(), "Paris");
     let executor = SingleRequestExecutor::new(provider.clone());
-    
+
     let first_response = match executor.send(chat_paris).await {
         Ok(response) => response,
         Err(e) => {
             panic!("First request failed: {}", e);
         }
     };
-    
+
     info!("{} Paris response received", provider_name);
-    
+
     // Check for tool calls
     if let Message::Assistant { tool_calls, .. } = &first_response {
-        assert!(!tool_calls.is_empty(), "Expected tool calls in the first response");
-        
+        assert!(
+            !tool_calls.is_empty(),
+            "Expected tool calls in the first response"
+        );
+
         // Verify there's a reference to Paris in the tool calls
-        let references_paris = tool_calls.iter().any(|call| call.function.arguments.contains("Paris"));
+        let references_paris = tool_calls
+            .iter()
+            .any(|call| call.function.arguments.contains("Paris"));
         assert!(references_paris, "Expected tool call to reference Paris");
     } else {
         panic!("Expected assistant message");
     }
-    
+
     // Test with London separately (without multi-turn conversation)
     let chat_london = chat_for_model(model.clone(), "London");
-    
+
     let second_response = match executor.send(chat_london).await {
         Ok(response) => response,
         Err(e) => {
             panic!("Second request failed: {}", e);
         }
     };
-    
+
     info!("{} London response received", provider_name);
-    
+
     // Check for tool calls and London references
     if let Message::Assistant { tool_calls, .. } = &second_response {
-        assert!(!tool_calls.is_empty(), "Expected tool calls in the second response");
-        
+        assert!(
+            !tool_calls.is_empty(),
+            "Expected tool calls in the second response"
+        );
+
         // Verify there's a reference to London in the tool calls
-        let references_london = tool_calls.iter().any(|call| call.function.arguments.contains("London"));
+        let references_london = tool_calls
+            .iter()
+            .any(|call| call.function.arguments.contains("London"));
         assert!(references_london, "Expected tool call to reference London");
     } else {
         panic!("Expected assistant message");
     }
-    
+
     info!("{} multi-turn conversation test successful", provider_name);
 }
 
@@ -172,18 +182,19 @@ async fn test_tool_result_conversion() {
         let chat = Chat::new(Claude::Haiku3)
             .with_system_prompt("You are a helpful assistant.")
             // Create a tool call
-            .add_message(Message::assistant_with_tool_calls(vec![
-                ToolCall {
-                    id: "call_123".to_string(),
-                    tool_type: "function".to_string(),
-                    function: Function {
-                        name: "get_weather".to_string(),
-                        arguments: r#"{"location":"San Francisco"}"#.to_string(),
-                    },
-                }
-            ]))
+            .add_message(Message::assistant_with_tool_calls(vec![ToolCall {
+                id: "call_123".to_string(),
+                tool_type: "function".to_string(),
+                function: Function {
+                    name: "get_weather".to_string(),
+                    arguments: r#"{"location":"San Francisco"}"#.to_string(),
+                },
+            }]))
             // Add a tool response
-            .add_message(Message::tool("call_123", "Weather in San Francisco: Sunny, 72°F"));
+            .add_message(Message::tool(
+                "call_123",
+                "Weather in San Francisco: Sunny, 72°F",
+            ));
 
         // Create a request using the provider
         let request = provider.accept(chat).unwrap();
@@ -207,21 +218,22 @@ async fn test_tool_result_conversion() {
         let provider = get_openai_provider().unwrap_or_default();
 
         // Create a sequence with a tool message
-        let chat = Chat::new(GPT::GPT4o)
+        let chat = Chat::new(OpenAi::GPT4o)
             .with_system_prompt("You are a helpful assistant.")
             // Create a tool call
-            .add_message(Message::assistant_with_tool_calls(vec![
-                ToolCall {
-                    id: "call_456".to_string(),
-                    tool_type: "function".to_string(),
-                    function: Function {
-                        name: "get_weather".to_string(),
-                        arguments: r#"{"location":"New York"}"#.to_string(),
-                    },
-                }
-            ]))
+            .add_message(Message::assistant_with_tool_calls(vec![ToolCall {
+                id: "call_456".to_string(),
+                tool_type: "function".to_string(),
+                function: Function {
+                    name: "get_weather".to_string(),
+                    arguments: r#"{"location":"New York"}"#.to_string(),
+                },
+            }]))
             // Add a tool response
-            .add_message(Message::tool("call_456", "Weather in New York: Cloudy, 68°F"));
+            .add_message(Message::tool(
+                "call_456",
+                "Weather in New York: Cloudy, 68°F",
+            ));
 
         // Create a request using the provider
         let request = provider.accept(chat).unwrap();
@@ -244,16 +256,14 @@ async fn test_tool_result_conversion() {
         let chat = Chat::new(Gemini::Flash20)
             .with_system_prompt("You are a helpful assistant.")
             // Create a tool call
-            .add_message(Message::assistant_with_tool_calls(vec![
-                ToolCall {
-                    id: "call_789".to_string(),
-                    tool_type: "function".to_string(),
-                    function: Function {
-                        name: "get_weather".to_string(),
-                        arguments: r#"{"location":"Tokyo"}"#.to_string(),
-                    },
-                }
-            ]))
+            .add_message(Message::assistant_with_tool_calls(vec![ToolCall {
+                id: "call_789".to_string(),
+                tool_type: "function".to_string(),
+                function: Function {
+                    name: "get_weather".to_string(),
+                    arguments: r#"{"location":"Tokyo"}"#.to_string(),
+                },
+            }]))
             // Add a tool response
             .add_message(Message::tool("call_789", "Weather in Tokyo: Sunny, 25°C"));
 
@@ -278,16 +288,14 @@ async fn test_tool_result_conversion() {
         let chat = Chat::new(Mistral::Small)
             .with_system_prompt("You are a helpful assistant.")
             // Create a tool call
-            .add_message(Message::assistant_with_tool_calls(vec![
-                ToolCall {
-                    id: "call_abc".to_string(),
-                    tool_type: "function".to_string(),
-                    function: Function {
-                        name: "get_weather".to_string(),
-                        arguments: r#"{"location":"Berlin"}"#.to_string(),
-                    },
-                }
-            ]))
+            .add_message(Message::assistant_with_tool_calls(vec![ToolCall {
+                id: "call_abc".to_string(),
+                tool_type: "function".to_string(),
+                function: Function {
+                    name: "get_weather".to_string(),
+                    arguments: r#"{"location":"Berlin"}"#.to_string(),
+                },
+            }]))
             // Add a tool response
             .add_message(Message::tool("call_abc", "Weather in Berlin: Rainy, 15°C"));
 
