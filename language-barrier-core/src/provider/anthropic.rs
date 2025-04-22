@@ -7,6 +7,7 @@ use reqwest::{Method, Request, Url};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
+use std::sync::Arc;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 /// Configuration for the Anthropic provider
@@ -93,8 +94,8 @@ impl Default for AnthropicProvider {
 }
 
 impl HTTPProvider<Claude> for AnthropicProvider {
-    fn accept(&self, chat: Chat<Claude>) -> Result<Request> {
-        info!("Creating request for Claude model: {:?}", chat.model);
+    fn accept(&self, model: Arc<Claude>, chat: Arc<Chat>) -> Result<Request> {
+        info!("Creating request for Claude model: {:?}", model);
         debug!("Messages in chat history: {}", chat.history.len());
 
         let url_str = format!("{}/messages", self.config.base_url);
@@ -151,7 +152,7 @@ impl HTTPProvider<Claude> for AnthropicProvider {
 
         // Create the request payload
         debug!("Creating request payload");
-        let payload = match self.create_request_payload(&chat) {
+        let payload = match self.create_request_payload(model, chat) {
             Ok(payload) => {
                 debug!("Request payload created successfully");
                 trace!("Model: {}", payload.model);
@@ -270,7 +271,11 @@ impl AnthropicProvider {
     /// This method converts the Chat's messages and settings into an Anthropic-specific
     /// format for the API request.
     #[instrument(skip(self, chat), level = "debug")]
-    fn create_request_payload(&self, chat: &Chat<Claude>) -> Result<AnthropicRequest> {
+    fn create_request_payload(
+        &self,
+        model: Arc<Claude>,
+        chat: Arc<Chat>,
+    ) -> Result<AnthropicRequest> {
         info!("Creating request payload for chat with Claude model");
         debug!("System prompt length: {}", chat.system_prompt.len());
         debug!("Messages in history: {}", chat.history.len());
@@ -301,7 +306,7 @@ impl AnthropicProvider {
         debug!("Converted {} messages for the request", messages.len());
 
         // Get model ID for the chat model
-        let model_id = Self::id_for_model(chat.model).to_string();
+        let model_id = Self::id_for_model(*model).to_string();
         debug!("Using model ID: {}", model_id);
 
         // Convert tool descriptions if a tool registry is provided
@@ -309,7 +314,7 @@ impl AnthropicProvider {
             .tools
             .as_ref()
             .map(|tools| tools.iter().map(AnthropicTool::from).collect());
-        
+
         // Note: For Anthropic, tool_choice is handled through the prompt and context
         // We don't modify the tools list based on the choice
 
@@ -1007,7 +1012,7 @@ mod tests {
         let model = Claude::Sonnet37 {
             use_extended_thinking: false,
         };
-        let chat = Chat::new(model)
+        let chat = Chat::new()
             .with_system_prompt("You are a helpful assistant.")
             .with_max_output_tokens(1024)
             .add_message(Message::user("Hello, how are you?"))
@@ -1015,7 +1020,7 @@ mod tests {
             .add_message(Message::user("Can you help me with a question?"));
 
         // Create the request
-        let request = provider.accept(chat).unwrap();
+        let request = provider.accept(Arc::new(model), Arc::new(chat)).unwrap();
 
         // Verify the request
         assert_eq!(request.method(), "POST");

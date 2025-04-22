@@ -1,0 +1,41 @@
+[package]
+name = "language-barrier-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# Core crate for LLM types
+language-barrier-core = { path = "../language-barrier-core" }
+
+# Tower and HTTP stack
+tower = { version = "0.4", features = ["util"] }
+tower-http = { version = "0.4", features = ["trace"] }
+tower-service = "0.3"
+reqwest.workspace = true
+
+# Async runtime
+tokio = { version = "1", features = ["full", "macros", "rt-multi-thread"] }
+futures = "0.3"
+async-trait.workspace = true
+
+# Logging and tracing
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# Serialization and common utilities
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+erased-serde = "0.3"
+chrono = "0.4"
+rand = "0.8"
+schemars.workspace = true
+
+# For free monad implementation
+pin-project = "1.1"
+dotenvy = "0.15.7"
+
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "test-util"] }

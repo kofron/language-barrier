@@ -1,5 +1,5 @@
 use dotenv::dotenv;
-use language_barrier_core::SingleRequestExecutor;
+use language_barrier_core::llm_service::{HTTPLlmService, LLMService};
 use language_barrier_core::model::{Claude, Gemini, Mistral, OpenAi, Sonnet35Version};
 use language_barrier_core::provider::HTTPProvider;
 use language_barrier_core::provider::anthropic::{AnthropicConfig, AnthropicProvider};
@@ -8,6 +8,7 @@ use language_barrier_core::provider::mistral::{MistralConfig, MistralProvider};
 use language_barrier_core::provider::openai::{OpenAIConfig, OpenAIProvider};
 use language_barrier_core::{Chat, Message};
 use std::env;
+use std::sync::Arc;
 use tracing::{Level, debug, info, warn};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*, registry};
 
@@ -43,12 +44,12 @@ async fn test_request_creation() {
         let model = Claude::Sonnet35 {
             version: Sonnet35Version::V2,
         };
-        let chat = Chat::new(model)
+        let chat = Chat::new()
             .with_system_prompt("You are a helpful AI assistant.")
             .with_max_output_tokens(1000)
             .add_message(Message::user("What is the capital of France?"));
 
-        let request = provider.accept(chat).unwrap();
+        let request = provider.accept(Arc::new(model), Arc::new(chat)).unwrap();
         assert_eq!(request.method(), "POST");
         assert_eq!(
             request.url().as_str(),
@@ -67,12 +68,12 @@ async fn test_request_creation() {
         info!("Testing OpenAI request creation");
         let provider = OpenAIProvider::new();
         let model = OpenAi::GPT4o;
-        let chat = Chat::new(model)
+        let chat = Chat::new()
             .with_system_prompt("You are a helpful AI assistant.")
             .with_max_output_tokens(1000)
             .add_message(Message::user("What is the capital of France?"));
 
-        let request = provider.accept(chat).unwrap();
+        let request = provider.accept(Arc::new(model), Arc::new(chat)).unwrap();
         assert_eq!(request.method(), "POST");
         assert_eq!(
             request.url().as_str(),
@@ -90,13 +91,13 @@ async fn test_request_creation() {
         info!("Testing Gemini request creation");
         let provider = GeminiProvider::new();
         let model = Gemini::Flash20;
-        let chat = Chat::new(model)
+        let chat = Chat::new()
             .with_system_prompt("You are a helpful AI assistant.")
             .with_max_output_tokens(1000)
             .add_message(Message::user("What is the capital of France?"));
 
         // Since Gemini has JSON schema issues, wrap it in a match to prevent test failures
-        match provider.accept(chat) {
+        match provider.accept(Arc::new(model), Arc::new(chat)) {
             Ok(request) => {
                 assert_eq!(request.method(), "POST");
                 assert!(request.url().as_str().contains("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"));
@@ -118,12 +119,12 @@ async fn test_request_creation() {
         info!("Testing Mistral request creation");
         let provider = MistralProvider::new();
         let model = Mistral::Small;
-        let chat = Chat::new(model)
+        let chat = Chat::new()
             .with_system_prompt("You are a helpful AI assistant.")
             .with_max_output_tokens(1000)
             .add_message(Message::user("What is the capital of France?"));
 
-        let request = provider.accept(chat).unwrap();
+        let request = provider.accept(Arc::new(model), Arc::new(chat)).unwrap();
         assert_eq!(request.method(), "POST");
         assert_eq!(
             request.url().as_str(),
@@ -156,19 +157,19 @@ async fn test_basic_chat_integration() {
                 api_version: "2023-06-01".to_string(),
             };
             let provider = AnthropicProvider::with_config(config);
-            let executor = SingleRequestExecutor::new(provider);
-
             let model = Claude::Sonnet35 {
                 version: Sonnet35Version::V2,
             };
-            let chat = Chat::new(model)
+            let service = HTTPLlmService::new(model, Arc::new(provider));
+            
+            let chat = Chat::new()
                 .with_system_prompt(
                     "You are a helpful AI assistant that provides very short answers.",
                 )
                 .with_max_output_tokens(100)
                 .add_message(Message::user("What is the capital of France?"));
 
-            if let Ok(response) = executor.send(chat).await {
+            if let Ok(response) = service.generate_next_message(chat).await {
                 verify_chat_response(&response);
             } else {
                 warn!("Anthropic test failed, but continuing with other providers");
@@ -186,17 +187,17 @@ async fn test_basic_chat_integration() {
                 organization: None,
             };
             let provider = OpenAIProvider::with_config(config);
-            let executor = SingleRequestExecutor::new(provider);
-
             let model = OpenAi::GPT4o;
-            let chat = Chat::new(model)
+            let service = HTTPLlmService::new(model, Arc::new(provider));
+            
+            let chat = Chat::new()
                 .with_system_prompt(
                     "You are a helpful AI assistant that provides very short answers.",
                 )
                 .with_max_output_tokens(100)
                 .add_message(Message::user("What is the capital of France?"));
 
-            if let Ok(response) = executor.send(chat).await {
+            if let Ok(response) = service.generate_next_message(chat).await {
                 verify_chat_response(&response);
             } else {
                 warn!("OpenAI test failed, but continuing with other providers");
@@ -222,17 +223,16 @@ async fn test_basic_chat_integration() {
                 base_url: "https://api.mistral.ai/v1".to_string(),
             };
             let provider = MistralProvider::with_config(config);
-            let executor = SingleRequestExecutor::new(provider);
-
-            let model = Mistral::Small;
-            let chat = Chat::new(model)
+            let model = Mistral::Small;  // Define the model
+            let svc = HTTPLlmService::new(model.clone(), Arc::new(provider));
+            let chat = Chat::new()
                 .with_system_prompt(
                     "You are a helpful AI assistant that provides very short answers.",
                 )
                 .with_max_output_tokens(100)
                 .add_message(Message::user("What is the capital of France?"));
 
-            if let Ok(response) = executor.send(chat).await {
+            if let Ok(response) = svc.generate_next_message(chat).await {
                 verify_chat_response(&response);
             } else {
                 warn!("Mistral test failed, but continuing with other providers");

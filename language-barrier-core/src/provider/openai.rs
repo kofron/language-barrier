@@ -1,10 +1,11 @@
 use crate::error::{Error, Result};
 use crate::message::{Content, ContentPart, Message};
 use crate::provider::HTTPProvider;
-use crate::{Chat, LlmToolInfo, ModelInfo};
+use crate::{Chat, LlmToolInfo, ModelInfo, OpenAi};
 use reqwest::{Method, Request, Url};
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::sync::Arc;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 /// Configuration for the OpenAI provider
@@ -90,9 +91,9 @@ impl Default for OpenAIProvider {
     }
 }
 
-impl<M: ModelInfo + OpenAIModelInfo> HTTPProvider<M> for OpenAIProvider {
-    fn accept(&self, chat: Chat<M>) -> Result<Request> {
-        info!("Creating request for OpenAI model: {:?}", chat.model);
+impl HTTPProvider<OpenAi> for OpenAIProvider {
+    fn accept(&self, model: Arc<OpenAi>, chat: Arc<Chat>) -> Result<Request> {
+        info!("Creating request for OpenAI model: {:?}", model);
         debug!("Messages in chat history: {}", chat.history.len());
 
         let url_str = format!("{}/chat/completions", self.config.base_url);
@@ -154,7 +155,7 @@ impl<M: ModelInfo + OpenAIModelInfo> HTTPProvider<M> for OpenAIProvider {
 
         // Create the request payload
         debug!("Creating request payload");
-        let payload = match self.create_request_payload(&chat) {
+        let payload = match self.create_request_payload(*model, &chat) {
             Ok(payload) => {
                 debug!("Request payload created successfully");
                 trace!("Model: {}", payload.model);
@@ -250,16 +251,13 @@ impl OpenAIProvider {
     /// This method converts the Chat's messages and settings into an OpenAI-specific
     /// format for the API request.
     #[instrument(skip(self, chat), level = "debug")]
-    fn create_request_payload<M: ModelInfo + OpenAIModelInfo>(
-        &self,
-        chat: &Chat<M>,
-    ) -> Result<OpenAIRequest> {
+    fn create_request_payload(&self, model: OpenAi, chat: &Chat) -> Result<OpenAIRequest> {
         info!("Creating request payload for chat with OpenAI model");
         debug!("System prompt length: {}", chat.system_prompt.len());
         debug!("Messages in history: {}", chat.history.len());
         debug!("Max output tokens: {}", chat.max_output_tokens);
 
-        let model_id = chat.model.openai_model_id();
+        let model_id = model.openai_model_id();
         debug!("Using model ID: {}", model_id);
 
         // Convert all messages including system prompt

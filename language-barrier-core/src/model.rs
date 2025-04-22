@@ -1,7 +1,7 @@
 use std::fmt;
 
 /// Model that can be converted to a string ID for API requests
-pub trait ModelInfo: Send + Sync + fmt::Debug {
+pub trait ModelInfo: Send + Sync + fmt::Debug + Clone + Copy {
     /// Context window size in tokens
     fn context_window(&self) -> usize;
 
@@ -27,6 +27,12 @@ pub enum Claude {
     Haiku35,
     Haiku3,
     Opus3,
+}
+
+impl Default for Claude {
+    fn default() -> Self {
+        Self::Opus3
+    }
 }
 
 impl ModelInfo for Claude {
