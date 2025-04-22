@@ -3,13 +3,12 @@ use std::{io, io::Write};
 
 use language_barrier_core::provider::anthropic::AnthropicConfig;
 use language_barrier_core::{
-    Secret, message::Message, model::Claude, provider::anthropic::AnthropicProvider,
+    model::Claude, provider::anthropic::AnthropicProvider,
 };
 use language_barrier_runtime::{
-    middleware::{ChatMiddleware, FinalInterpreter, ServiceBuilder},
+    middleware::{GenerateNextMessageService, FinalInterpreter, ServiceBuilder},
     ops,
 };
-use tokio::runtime::Runtime;
 use tower_service::Service;
 use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
@@ -35,15 +34,18 @@ async fn run_chat() -> language_barrier_core::error::Result<()> {
         api_version: "2023-06-01".to_string(),
     });
 
+    // Create the model and provider arcs
+    let model = std::sync::Arc::new(Claude::Opus3);
+    let provider = std::sync::Arc::new(provider);
+
     // Configure the middleware stack
     let mut service = ServiceBuilder::new()
         .service(
-            ChatMiddleware::new(FinalInterpreter::new(), Claude::Opus3, provider)
-                .with_system_prompt("You are a helpful assistant. Provide clear and concise answers to the user's questions.")
+            GenerateNextMessageService::new(FinalInterpreter::new(), model, provider)
         );
 
     // Keep track of conversation history
-    let mut chat = language_barrier_core::chat::Chat::new(Claude::Opus3).with_system_prompt(
+    let mut chat = language_barrier_core::chat::Chat::new().with_system_prompt(
         "You are a helpful assistant. Provide clear and concise answers to the user's questions.",
     );
 

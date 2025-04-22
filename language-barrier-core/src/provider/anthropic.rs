@@ -94,7 +94,7 @@ impl Default for AnthropicProvider {
 }
 
 impl HTTPProvider<Claude> for AnthropicProvider {
-    fn accept(&self, model: Arc<Claude>, chat: Arc<Chat>) -> Result<Request> {
+    fn accept(&self, model: Claude, chat: &Chat) -> Result<Request> {
         info!("Creating request for Claude model: {:?}", model);
         debug!("Messages in chat history: {}", chat.history.len());
 
@@ -271,11 +271,7 @@ impl AnthropicProvider {
     /// This method converts the Chat's messages and settings into an Anthropic-specific
     /// format for the API request.
     #[instrument(skip(self, chat), level = "debug")]
-    fn create_request_payload(
-        &self,
-        model: Arc<Claude>,
-        chat: Arc<Chat>,
-    ) -> Result<AnthropicRequest> {
+    fn create_request_payload(&self, model: Claude, chat: &Chat) -> Result<AnthropicRequest> {
         info!("Creating request payload for chat with Claude model");
         debug!("System prompt length: {}", chat.system_prompt.len());
         debug!("Messages in history: {}", chat.history.len());
@@ -306,7 +302,7 @@ impl AnthropicProvider {
         debug!("Converted {} messages for the request", messages.len());
 
         // Get model ID for the chat model
-        let model_id = Self::id_for_model(*model).to_string();
+        let model_id = Self::id_for_model(model).to_string();
         debug!("Using model ID: {}", model_id);
 
         // Convert tool descriptions if a tool registry is provided
@@ -1020,7 +1016,7 @@ mod tests {
             .add_message(Message::user("Can you help me with a question?"));
 
         // Create the request
-        let request = provider.accept(Arc::new(model), Arc::new(chat)).unwrap();
+        let request = provider.accept(model, &chat).unwrap();
 
         // Verify the request
         assert_eq!(request.method(), "POST");

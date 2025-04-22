@@ -91,7 +91,7 @@ pub trait MistralModelInfo {
 }
 
 impl HTTPProvider<Mistral> for MistralProvider {
-    fn accept(&self, model: Arc<Mistral>, chat: Arc<Chat>) -> Result<Request> {
+    fn accept(&self, model: Mistral, chat: &Chat) -> Result<Request> {
         info!("Creating request for Mistral model: {:?}", model);
         debug!("Messages in chat history: {}", chat.history.len());
 
@@ -140,7 +140,7 @@ impl HTTPProvider<Mistral> for MistralProvider {
 
         // Create the request payload
         debug!("Creating request payload");
-        let payload = match self.create_request_payload(*model, &chat) {
+        let payload = match self.create_request_payload(model, chat) {
             Ok(payload) => {
                 debug!("Request payload created successfully");
                 trace!("Model: {}", payload.model);

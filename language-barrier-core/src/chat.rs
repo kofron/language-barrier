@@ -7,7 +7,7 @@ use crate::{Result, ToolDefinition};
 /// The main Chat client that users will interact with.
 /// All methods return a new instance rather than mutating the existing one,
 /// following the immutable builder pattern.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Chat {
     // Tunable knobs / state
     pub system_prompt: String,

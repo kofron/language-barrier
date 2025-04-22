@@ -86,7 +86,7 @@ impl Default for GeminiProvider {
 }
 
 impl HTTPProvider<Gemini> for GeminiProvider {
-    fn accept(&self, model: Arc<Gemini>, chat: Arc<Chat>) -> Result<Request> {
+    fn accept(&self, model: Gemini, chat: &Chat) -> Result<Request> {
         info!("Creating request for Gemini model: {:?}", model);
         debug!("Messages in chat history: {}", chat.history.len());
 
@@ -129,7 +129,7 @@ impl HTTPProvider<Gemini> for GeminiProvider {
 
         // Create the request payload
         debug!("Creating request payload");
-        let payload = match self.create_request_payload(*model, &chat) {
+        let payload = match self.create_request_payload(model, chat) {
             Ok(payload) => {
                 debug!("Request payload created successfully");
                 trace!("Number of contents: {}", payload.contents.len());

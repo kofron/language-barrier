@@ -4,13 +4,10 @@ use futures::Future;
 use language_barrier_core::error::{Error, Result};
 use tower_service::Service;
 
-mod break_on_tool;
-mod chat;
+mod generate_next_message;
 mod tool_executor;
 
-// pub use auto_tool::AutoToolMiddleware;
-pub use break_on_tool::BreakOnToolMiddleware;
-pub use chat::ChatMiddleware;
+pub use generate_next_message::GenerateNextMessageService;
 pub use tool_executor::ToolExecutorMiddleware;
 
 // Re-export tower types for convenience

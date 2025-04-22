@@ -1,7 +1,7 @@
 use crate::error::{Error, Result};
 use crate::message::{Content, ContentPart, Message};
 use crate::provider::HTTPProvider;
-use crate::{Chat, LlmToolInfo, ModelInfo, OpenAi};
+use crate::{Chat, LlmToolInfo, OpenAi};
 use reqwest::{Method, Request, Url};
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -92,7 +92,7 @@ impl Default for OpenAIProvider {
 }
 
 impl HTTPProvider<OpenAi> for OpenAIProvider {
-    fn accept(&self, model: Arc<OpenAi>, chat: Arc<Chat>) -> Result<Request> {
+    fn accept(&self, model: OpenAi, chat: &Chat) -> Result<Request> {
         info!("Creating request for OpenAI model: {:?}", model);
         debug!("Messages in chat history: {}", chat.history.len());
 
@@ -155,7 +155,7 @@ impl HTTPProvider<OpenAi> for OpenAIProvider {
 
         // Create the request payload
         debug!("Creating request payload");
-        let payload = match self.create_request_payload(*model, &chat) {
+        let payload = match self.create_request_payload(model, &chat) {
             Ok(payload) => {
                 debug!("Request payload created successfully");
                 trace!("Model: {}", payload.model);

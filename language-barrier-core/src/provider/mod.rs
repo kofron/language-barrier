@@ -19,7 +19,7 @@ pub trait HTTPProvider<M: ModelInfo>: Send + Sync {
     ///
     /// Returns an error if the chat cannot be converted to a request, for example
     /// if the provider configuration is invalid or if serialization fails.
-    fn accept(&self, model: Arc<M>, chat: Arc<Chat>) -> Result<Request>;
+    fn accept(&self, model: M, chat: &Chat) -> Result<Request>;
 
     /// Parses a raw HTTP response into a message
     ///

@@ -1,13 +1,12 @@
 use std::fmt;
+use std::collections::HashMap;
 
 use language_barrier_core::{
-    chat::Chat,
-    error::Result,
-    message::{Content, Message, ToolCall},
-    model::ModelInfo,
-    tool::LlmToolInfo,
+    chat::Chat, 
+    error::Result, 
+    message::{Content, Message, ToolCall}
 };
-use std::{collections::HashMap, marker::Send};
+use std::marker::Send;
 
 /// Tool execution result
 #[derive(Debug, Clone)]
@@ -16,49 +15,37 @@ pub struct ToolResult {
     pub content: String,
 }
 
+pub enum ExecuteToolBehavior {
+    Break,
+    AutoContinue,
+}
+
 /// Free monad operations for the LLM runtime
 pub enum LlmOp<Next> {
-    /// Send a message to the LLM with optional tools
-    Chat {
-        messages: Vec<Message>,
-        tools: Option<Vec<LlmToolInfo>>,
-        next: Box<dyn FnOnce(Result<Message>) -> Next + Send>,
+    GenerateNextMessage {
+        chat: Chat,
+        next: Box<dyn FnOnce(Result<Chat>) -> Next + Send>,
     },
     /// Execute a specific tool call
     ExecuteTool {
         tool_call: ToolCall,
         next: Box<dyn FnOnce(Result<ToolResult>) -> Next + Send>,
     },
-    /// Add a message to an existing Chat instance
-    AddMessage {
-        chat: Box<dyn std::any::Any + Send>,
-        message: Message,
-        next: Box<dyn FnOnce(Result<Box<dyn std::any::Any + Send>>) -> Next + Send>,
-    },
     /// Terminal operation
-    Done { result: Result<Message> },
+    Done { result: Result<Chat> },
 }
 
 impl<Next: fmt::Debug> fmt::Debug for LlmOp<Next> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LlmOp::Chat {
-                messages, tools, ..
-            } => f
-                .debug_struct("Chat")
-                .field("messages", messages)
-                .field("tools", tools)
+            LlmOp::GenerateNextMessage { chat, .. } => f
+                .debug_struct("GenerateNextMessage")
+                .field("chat", chat)
                 .field("next", &"<function>")
                 .finish(),
             LlmOp::ExecuteTool { tool_call, .. } => f
                 .debug_struct("ExecuteTool")
                 .field("tool_call", tool_call)
-                .field("next", &"<function>")
-                .finish(),
-            LlmOp::AddMessage { message, .. } => f
-                .debug_struct("AddMessage")
-                .field("message", message)
-                .field("chat", &"<boxed_chat>")
                 .field("next", &"<function>")
                 .finish(),
             LlmOp::Done { result } => f.debug_struct("Done").field("result", result).finish(),
@@ -98,26 +85,14 @@ impl<A: 'static> LlmM<A> {
         match (self.op, self.result) {
             (None, Some(result)) => f(result),
             (Some(op), None) => match op {
-                LlmOp::Chat {
-                    messages,
-                    tools,
-                    next,
-                } => LlmM::new(LlmOp::Chat {
-                    messages,
-                    tools,
-                    next: Box::new(move |res| next(res).and_then(f)),
-                }),
+                LlmOp::GenerateNextMessage { chat, next } => {
+                    LlmM::new(LlmOp::GenerateNextMessage {
+                        chat,
+                        next: Box::new(move |res| next(res).and_then(f)),
+                    })
+                }
                 LlmOp::ExecuteTool { tool_call, next } => LlmM::new(LlmOp::ExecuteTool {
                     tool_call,
-                    next: Box::new(move |res| next(res).and_then(f)),
-                }),
-                LlmOp::AddMessage {
-                    chat,
-                    message,
-                    next,
-                } => LlmM::new(LlmOp::AddMessage {
-                    chat,
-                    message,
                     next: Box::new(move |res| next(res).and_then(f)),
                 }),
                 LlmOp::Done { result } => LlmM::new(LlmOp::Done { result }),
@@ -136,10 +111,9 @@ impl<A: 'static> LlmM<A> {
 }
 
 // Helper functions to create operations
-pub fn chat(messages: Vec<Message>, tools: Option<Vec<LlmToolInfo>>) -> LlmM<Result<Message>> {
-    LlmM::new(LlmOp::Chat {
-        messages,
-        tools,
+pub fn generate_next_message(chat: Chat) -> LlmM<Result<Chat>> {
+    LlmM::new(LlmOp::GenerateNextMessage {
+        chat,
         next: Box::new(LlmM::pure),
     })
 }
@@ -151,89 +125,11 @@ pub fn execute_tool(tool_call: ToolCall) -> LlmM<Result<ToolResult>> {
     })
 }
 
-/// Add a message to an existing Chat instance
-///
-/// This operation takes a Chat instance and a Message, returning the updated Chat instance
-/// with the message added immutably. This keeps all Chat interactions immutable.
-///
-/// # Arguments
-///
-/// * `chat` - The Chat instance to add the message to
-/// * `message` - The Message to add to the Chat
-///
-/// # Returns
-///
-/// A Result containing the updated Chat instance
-///
-/// # Examples
-///
-/// ```
-/// use language_barrier_core::{Chat, model::Claude, message::Message};
-/// use language_barrier_runtime::ops;
-///
-/// let chat = Chat::new(Claude::default())
-///     .with_system_prompt("You are helpful assistant");
-///
-/// // Create a user message
-/// let message = Message::user("Hello, how can you help me?");
-///
-/// // Add the message to the chat
-/// let program = ops::add_message(chat, message);
-/// ```
-pub fn add_message<M: 'static + ModelInfo + Clone + Send>(
-    chat: Chat<M>,
-    message: Message,
-) -> LlmM<Result<Chat<M>>> {
-    // First box the chat so we can send it through the operation
-    let boxed_chat: Box<dyn std::any::Any + Send> = Box::new(chat);
-
-    // Create the operation
-    LlmM::new(LlmOp::AddMessage {
-        chat: boxed_chat,
-        message,
-        next: Box::new(move |result: Result<Box<dyn std::any::Any + Send>>| {
-            // Unbox the chat and return it
-            match result {
-                Ok(boxed) => {
-                    // Try to downcast to the specific Chat type
-                    match boxed.downcast::<Chat<M>>() {
-                        Ok(chat) => LlmM::pure(Ok(*chat)),
-                        Err(_) => LlmM::pure(Err(language_barrier_core::error::Error::Other(
-                            "Could not downcast chat".into(),
-                        ))),
-                    }
-                }
-                Err(e) => LlmM::pure(Err(e)),
-            }
-        }),
-    })
-}
-
-pub fn done(result: Result<Message>) -> LlmM<Result<Message>> {
+pub fn done(result: Result<Chat>) -> LlmM<Result<Chat>> {
     LlmM::new(LlmOp::Done { result })
 }
 
-// Message creation helpers
-
-/// Create a user message with the given text content
-///
-/// This is a helper function for creating a user message with text content.
-///
-/// # Arguments
-///
-/// * `text` - The text content of the message
-///
-/// # Returns
-///
-/// A user message with the given text content
-///
-/// # Examples
-///
-/// ```
-/// use language_barrier_runtime::ops;
-///
-/// let message = ops::user_message("Hello, how can you help me?");
-/// ```
+/// Helper to create a user message from a string
 pub fn user_message(text: impl Into<String>) -> Message {
     Message::User {
         content: Content::Text(text.into()),
@@ -242,56 +138,34 @@ pub fn user_message(text: impl Into<String>) -> Message {
     }
 }
 
-/// Create a user message with the given text content and name
-///
-/// This is a helper function for creating a user message with text content and a name.
-///
-/// # Arguments
-///
-/// * `text` - The text content of the message
-/// * `name` - The name to associate with the message
-///
-/// # Returns
-///
-/// A user message with the given text content and name
-///
-/// # Examples
-///
-/// ```
-/// use language_barrier_runtime::ops;
-///
-/// let message = ops::named_user_message("Hello, how can you help me?", "John");
-/// ```
-pub fn named_user_message(text: impl Into<String>, name: impl Into<String>) -> Message {
-    Message::User {
-        content: Content::Text(text.into()),
-        metadata: HashMap::new(),
-        name: Some(name.into()),
-    }
+/// Operation to add a message to a chat
+pub fn add_message(chat: Chat, message: Message) -> LlmM<Result<Chat>> {
+    LlmM::pure(Ok(chat.add_message(message)))
 }
 
-/// Create a system message with the given text content
-///
-/// This is a helper function for creating a system message with text content.
-///
-/// # Arguments
-///
-/// * `text` - The text content of the message
-///
-/// # Returns
-///
-/// A system message with the given text content
-///
-/// # Examples
-///
-/// ```
-/// use language_barrier_runtime::ops;
-///
-/// let message = ops::system_message("You are a helpful assistant.");
-/// ```
-pub fn system_message(text: impl Into<String>) -> Message {
-    Message::System {
-        content: text.into(),
-        metadata: HashMap::new(),
+/// Operation to perform a chat request with a given history
+pub fn chat(messages: Vec<Message>, _next: Option<Message>) -> LlmM<Result<Message>> {
+    // Create a chat with the given history
+    let mut chat = Chat::new();
+    for message in messages {
+        chat = chat.add_message(message);
     }
+    
+    // Generate the next message
+    generate_next_message(chat)
+        .and_then(|result| {
+            match result {
+                Ok(updated_chat) => {
+                    // Extract the last message (should be the assistant's response)
+                    if let Some(last_message) = updated_chat.history.last().cloned() {
+                        LlmM::pure(Ok(last_message))
+                    } else {
+                        LlmM::pure(Err(language_barrier_core::error::Error::Other(
+                            "No messages in chat history after generating response".into(),
+                        )))
+                    }
+                }
+                Err(e) => LlmM::pure(Err(e)),
+            }
+        })
 }
