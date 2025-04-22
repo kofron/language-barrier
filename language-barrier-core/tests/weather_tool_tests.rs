@@ -1,6 +1,6 @@
 use language_barrier_core::{ModelInfo, SingleRequestExecutor};
 
-use language_barrier_core::model::{Claude, GPT, Mistral, Sonnet35Version};
+use language_barrier_core::model::{Claude, Mistral, OpenAi, Sonnet35Version};
 use language_barrier_core::{Chat, Message};
 use parameterized::*;
 use test_tools::WeatherTool;
@@ -11,8 +11,7 @@ mod test_tools;
 mod test_utils;
 
 use test_utils::{
-    get_anthropic_provider, get_mistral_provider, get_openai_provider,
-    setup_tracing,
+    get_anthropic_provider, get_mistral_provider, get_openai_provider, setup_tracing,
 };
 
 /// Creates a chat for testing with the given model
@@ -56,11 +55,11 @@ async fn test_tool_anthropic_weather(test_case: Claude) {
 
 #[parameterized(
     test_case = {
-        GPT::GPT4o
+        OpenAi::GPT4o
     }
 )]
 #[parameterized_macro(tokio::test)]
-async fn test_tool_openai_weather(test_case: GPT) {
+async fn test_tool_openai_weather(test_case: OpenAi) {
     setup_tracing(Level::DEBUG);
 
     // Skip test if no API key is available

@@ -1,6 +1,6 @@
 use language_barrier_core::{ModelInfo, SingleRequestExecutor};
 
-use language_barrier_core::model::{Claude, GPT, Gemini, Mistral, Sonnet35Version};
+use language_barrier_core::model::{Claude, Gemini, Mistral, OpenAi, Sonnet35Version};
 use language_barrier_core::{Chat, Message};
 use parameterized::*;
 use test_tools::CalculatorTool;
@@ -56,11 +56,11 @@ async fn test_tool_anthropic_calculator(test_case: Claude) {
 
 #[parameterized(
     test_case = {
-        GPT::GPT4o
+        OpenAi::GPT4o
     }
 )]
 #[parameterized_macro(tokio::test)]
-async fn test_tool_openai_calculator(test_case: GPT) {
+async fn test_tool_openai_calculator(test_case: OpenAi) {
     setup_tracing(Level::DEBUG);
 
     // Skip test if no API key is available
@@ -101,7 +101,7 @@ async fn test_tool_gemini_calculator(test_case: Gemini) {
 
     // Generate the request
     let executor = SingleRequestExecutor::new(provider);
-    
+
     // For now, we're not testing actual tool call content with Gemini due to schema issues
     // Just swallow any errors and count the test as passed
     match executor.send(chat).await {

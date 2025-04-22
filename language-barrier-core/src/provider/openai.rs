@@ -294,21 +294,53 @@ impl OpenAIProvider {
             .map(|tools| tools.iter().map(OpenAITool::from).collect());
 
         // Create the tool choice setting
-        let tool_choice = if tools.is_some() {
-            Some("auto".to_string())
+        let tool_choice = if let Some(choice) = &chat.tool_choice {
+            // Use the explicitly configured choice
+            match choice {
+                crate::tool::ToolChoice::Auto => Some(serde_json::json!("auto")),
+                // OpenAI uses "required" for what we call "Any"
+                crate::tool::ToolChoice::Any => Some(serde_json::json!("required")),
+                crate::tool::ToolChoice::None => Some(serde_json::json!("none")),
+                crate::tool::ToolChoice::Specific(name) => {
+                    // For specific tool, we need to create an object with type and function properties
+                    Some(serde_json::json!({
+                        "type": "function",
+                        "function": {
+                            "name": name
+                        }
+                    }))
+                }
+            }
+        } else if tools.is_some() {
+            // Default to auto if tools are present but no choice specified
+            Some(serde_json::json!("auto"))
         } else {
             None
         };
 
         // Create the request
         debug!("Creating OpenAIRequest");
+
+        // Check if this is an O-series model (starts with "o-")
+        let is_o_series = model_id.starts_with("o");
+
         let request = OpenAIRequest {
             model: model_id,
             messages,
             temperature: None,
             top_p: None,
             n: None,
-            max_tokens: Some(chat.max_output_tokens),
+            // For O-series models, use max_completion_tokens instead of max_tokens
+            max_tokens: if is_o_series {
+                None
+            } else {
+                Some(chat.max_output_tokens)
+            },
+            max_completion_tokens: if is_o_series {
+                Some(chat.max_output_tokens)
+            } else {
+                None
+            },
             presence_penalty: None,
             frequency_penalty: None,
             stream: None,
@@ -412,9 +444,12 @@ pub(crate) struct OpenAIRequest {
     /// Number of completions to generate
     #[serde(skip_serializing_if = "Option::is_none")]
     pub n: Option<usize>,
-    /// Maximum number of tokens to generate
+    /// Maximum number of tokens to generate (for GPT models)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<usize>,
+    /// Maximum number of tokens to generate (for O-series models)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_completion_tokens: Option<usize>,
     /// Presence penalty
     #[serde(skip_serializing_if = "Option::is_none")]
     pub presence_penalty: Option<f32>,
@@ -429,7 +464,7 @@ pub(crate) struct OpenAIRequest {
     pub tools: Option<Vec<OpenAITool>>,
     /// Tool choice strategy (auto, none, or a specific tool)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_choice: Option<String>,
+    pub tool_choice: Option<serde_json::Value>,
 }
 
 /// Represents a response from the OpenAI API

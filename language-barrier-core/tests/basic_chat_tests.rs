@@ -1,6 +1,6 @@
 use dotenv::dotenv;
 use language_barrier_core::SingleRequestExecutor;
-use language_barrier_core::model::{Claude, GPT, Gemini, Mistral, Sonnet35Version};
+use language_barrier_core::model::{Claude, Gemini, Mistral, OpenAi, Sonnet35Version};
 use language_barrier_core::provider::HTTPProvider;
 use language_barrier_core::provider::anthropic::{AnthropicConfig, AnthropicProvider};
 use language_barrier_core::provider::gemini::GeminiProvider;
@@ -66,7 +66,7 @@ async fn test_request_creation() {
     {
         info!("Testing OpenAI request creation");
         let provider = OpenAIProvider::new();
-        let model = GPT::GPT4o;
+        let model = OpenAi::GPT4o;
         let chat = Chat::new(model)
             .with_system_prompt("You are a helpful AI assistant.")
             .with_max_output_tokens(1000)
@@ -188,7 +188,7 @@ async fn test_basic_chat_integration() {
             let provider = OpenAIProvider::with_config(config);
             let executor = SingleRequestExecutor::new(provider);
 
-            let model = GPT::GPT4o;
+            let model = OpenAi::GPT4o;
             let chat = Chat::new(model)
                 .with_system_prompt(
                     "You are a helpful AI assistant that provides very short answers.",

@@ -370,6 +370,49 @@ impl GeminiProvider {
                     .collect(),
             }]
         });
+        
+        // Note: For Gemini, tool_choice is handled through the API's behavior
+        // We don't modify the tools list based on the choice
+
+        // Create the tool_config setting based on Google's specific format
+        let tool_config = if let Some(choice) = &chat.tool_choice {
+            match choice {
+                crate::tool::ToolChoice::Auto => Some(GeminiToolConfig {
+                    function_calling_config: GeminiFunctionCallingConfig {
+                        mode: "auto".to_string(),
+                        allowed_function_names: None,
+                    },
+                }),
+                crate::tool::ToolChoice::Any => Some(GeminiToolConfig {
+                    function_calling_config: GeminiFunctionCallingConfig {
+                        mode: "any".to_string(),
+                        allowed_function_names: None,
+                    },
+                }),
+                crate::tool::ToolChoice::None => Some(GeminiToolConfig {
+                    function_calling_config: GeminiFunctionCallingConfig {
+                        mode: "none".to_string(),
+                        allowed_function_names: None,
+                    },
+                }),
+                crate::tool::ToolChoice::Specific(name) => Some(GeminiToolConfig {
+                    function_calling_config: GeminiFunctionCallingConfig {
+                        mode: "auto".to_string(), // Use mode auto with specific allowed function
+                        allowed_function_names: Some(vec![name.clone()]),
+                    },
+                }),
+            }
+        } else if tools.is_some() {
+            // Default to auto if tools are present but no choice specified
+            Some(GeminiToolConfig {
+                function_calling_config: GeminiFunctionCallingConfig {
+                    mode: "auto".to_string(),
+                    allowed_function_names: None,
+                },
+            })
+        } else {
+            None
+        };
 
         // Create the request
         debug!("Creating GeminiRequest");
@@ -378,6 +421,7 @@ impl GeminiProvider {
             system_instruction,
             generation_config,
             tools,
+            tool_config,
         };
 
         info!("Request payload created successfully");
@@ -509,6 +553,26 @@ pub(crate) struct GeminiTool {
     pub function_declarations: Vec<GeminiFunctionDeclaration>,
 }
 
+// Gemini uses GeminiToolConfig instead of a direct tool_choice field
+
+/// Tool config for Gemini API
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct GeminiToolConfig {
+    /// Function calling configuration
+    #[serde(rename = "function_calling_config")]
+    pub function_calling_config: GeminiFunctionCallingConfig,
+}
+
+/// Function calling config for Gemini API
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct GeminiFunctionCallingConfig {
+    /// The mode (auto, any, none)
+    pub mode: String,
+    /// List of specific function names that are allowed (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allowed_function_names: Option<Vec<String>>,
+}
+
 /// Represents a request to the Gemini API
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct GeminiRequest {
@@ -523,6 +587,9 @@ pub(crate) struct GeminiRequest {
     /// The tools (functions) available to the model
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<GeminiTool>>,
+    /// Tool configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_config: Option<GeminiToolConfig>,
 }
 
 /// Represents a response from the Gemini API
