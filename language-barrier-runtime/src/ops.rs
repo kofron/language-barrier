@@ -1,10 +1,10 @@
-use std::fmt;
 use std::collections::HashMap;
+use std::fmt;
 
 use language_barrier_core::{
-    chat::Chat, 
-    error::Result, 
-    message::{Content, Message, ToolCall}
+    chat::Chat,
+    error::Result,
+    message::{Content, Message, ToolCall},
 };
 use std::marker::Send;
 
@@ -141,31 +141,4 @@ pub fn user_message(text: impl Into<String>) -> Message {
 /// Operation to add a message to a chat
 pub fn add_message(chat: Chat, message: Message) -> LlmM<Result<Chat>> {
     LlmM::pure(Ok(chat.add_message(message)))
-}
-
-/// Operation to perform a chat request with a given history
-pub fn chat(messages: Vec<Message>, _next: Option<Message>) -> LlmM<Result<Message>> {
-    // Create a chat with the given history
-    let mut chat = Chat::new();
-    for message in messages {
-        chat = chat.add_message(message);
-    }
-    
-    // Generate the next message
-    generate_next_message(chat)
-        .and_then(|result| {
-            match result {
-                Ok(updated_chat) => {
-                    // Extract the last message (should be the assistant's response)
-                    if let Some(last_message) = updated_chat.history.last().cloned() {
-                        LlmM::pure(Ok(last_message))
-                    } else {
-                        LlmM::pure(Err(language_barrier_core::error::Error::Other(
-                            "No messages in chat history after generating response".into(),
-                        )))
-                    }
-                }
-                Err(e) => LlmM::pure(Err(e)),
-            }
-        })
 }

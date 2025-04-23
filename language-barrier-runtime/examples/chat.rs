@@ -2,11 +2,9 @@ use std::env;
 use std::{io, io::Write};
 
 use language_barrier_core::provider::anthropic::AnthropicConfig;
-use language_barrier_core::{
-    model::Claude, provider::anthropic::AnthropicProvider,
-};
+use language_barrier_core::{model::Claude, provider::anthropic::AnthropicProvider};
 use language_barrier_runtime::{
-    middleware::{GenerateNextMessageService, FinalInterpreter, ServiceBuilder},
+    middleware::{FinalInterpreter, GenerateNextMessageService, ServiceBuilder},
     ops,
 };
 use tower_service::Service;
@@ -39,10 +37,11 @@ async fn run_chat() -> language_barrier_core::error::Result<()> {
     let provider = std::sync::Arc::new(provider);
 
     // Configure the middleware stack
-    let mut service = ServiceBuilder::new()
-        .service(
-            GenerateNextMessageService::new(FinalInterpreter::new(), model, provider)
-        );
+    let mut service = ServiceBuilder::new().service(GenerateNextMessageService::new(
+        FinalInterpreter::new(),
+        model,
+        provider,
+    ));
 
     // Keep track of conversation history
     let mut chat = language_barrier_core::chat::Chat::new().with_system_prompt(
@@ -78,7 +77,7 @@ async fn run_chat() -> language_barrier_core::error::Result<()> {
                 let updated_chat = chat_result.unwrap();
 
                 // Create a chat program with the updated history
-                ops::chat(updated_chat.history.clone(), None)
+                ops::generate_next_message(updated_chat)
             });
 
         // Send the message and get response
@@ -89,7 +88,7 @@ async fn run_chat() -> language_barrier_core::error::Result<()> {
         println!();
 
         // Update the chat history with both messages
-        chat = chat.add_message(user_message).add_message(result);
+        chat = result.add_message(user_message);
     }
 
     Ok(())

@@ -1,4 +1,7 @@
-use std::task::{Context, Poll};
+use std::{
+    sync::Arc,
+    task::{Context, Poll},
+};
 
 use language_barrier_core::{
     ToolDefinition,
@@ -16,6 +19,7 @@ use super::BoxFuture;
 pub struct ToolExecutorMiddleware<S, T: ToolDefinition> {
     inner: S,
     def: T,
+    f: Arc<dyn Fn(T::Input) -> T::Output + Send + Sync>,
 }
 
 impl<S, T> ToolExecutorMiddleware<S, T>
@@ -23,13 +27,37 @@ where
     T: ToolDefinition + Clone + Send + Sync + 'static,
 {
     /// Creates a new ToolExecutorMiddleware with a ToolRegistry
-    pub fn new(inner: S, def: T) -> Self {
-        Self { inner, def }
+    pub fn new(inner: S, def: T, f: Arc<dyn Fn(T::Input) -> T::Output + Send + Sync>) -> Self {
+        Self { inner, def, f }
     }
 
     // Execute the tool with the given tool call
-    pub async fn execute_tool_call(&self, tool_call: &ToolCall) -> Result<ToolResult> {
-        todo!()
+    fn execute_tool_call(_def: &T, f: &Arc<dyn Fn(T::Input) -> T::Output + Send + Sync>, tool_call: &ToolCall) -> Result<String> {
+        tracing::debug!("Executing tool call: {:?}", tool_call);
+        tracing::debug!("Tool arguments: {}", tool_call.function.arguments);
+        
+        let inp: T::Input = match serde_json::from_str(tool_call.function.arguments.as_str()) {
+            Ok(inp) => {
+                tracing::debug!("Deserialized tool input successfully");
+                inp
+            },
+            Err(e) => {
+                tracing::error!("Failed to deserialize tool input: {}", e);
+                return Err(language_barrier_core::Error::Serialization(e));
+            }
+        };
+        
+        let result = f(inp);
+        tracing::debug!("Tool execution completed, serializing result");
+        
+        serde_json::to_string(&result).map_err(|e| {
+            tracing::error!("Failed to serialize tool output: {}", e);
+            language_barrier_core::Error::from(
+                language_barrier_core::ToolError::OutputTypeMismatch(
+                    format!("Failed to serialize tool output to string: {}", e)
+                ),
+            )
+        })
     }
 }
 
@@ -52,14 +80,7 @@ where
         // Clone things we need to move into the async block
         let mut inner = self.inner.clone();
         let def = self.def.clone();
-        // Need to create an execute_tool_call implementation that we can call from inside the async block
-        let execute_fn = move |tool_call: &ToolCall| -> Result<ToolResult> {
-            // Implement the tool execution logic here, using the cloned def
-            // TODO: this obviously isn't real
-            Err(Error::Other(
-                format!("Tool {} execution not implemented", tool_call.function.name).into(),
-            ))
-        };
+        let f = self.f.clone();
 
         // Extract the operation and result
         let operation = program.op.take();
@@ -70,9 +91,12 @@ where
                 Some(LlmOp::ExecuteTool { tool_call, next }) => {
                     if tool_call.function.name == def.name() {
                         let tool_call_clone = tool_call.clone();
-
-                        // Call the execute function we defined above, not self.execute_tool_call
-                        let result = execute_fn(&tool_call_clone);
+                        // Call the static execute function instead of self.execute_tool_call
+                        let result = Self::execute_tool_call(&def, &f, &tool_call_clone)
+                            .map(|s| ToolResult {
+                                content: s,
+                                tool_call_id: tool_call.id,
+                            });
                         // Continue with the result
                         let next_program = next(result);
                         inner.call(next_program).await

@@ -167,6 +167,18 @@ impl HTTPProvider<Claude> for AnthropicProvider {
             }
         };
 
+        // Log the complete JSON for debugging
+        let payload_json = match serde_json::to_string_pretty(&payload) {
+            Ok(json) => {
+                debug!("Request payload JSON: \n{}", json);
+                json
+            }
+            Err(e) => {
+                error!("Failed to serialize payload to JSON string: {}", e);
+                "Failed to serialize payload".to_string()
+            }
+        };
+        
         // Set the request body
         debug!("Serializing request payload");
         let body_bytes = match serde_json::to_vec(&payload) {
@@ -310,31 +322,49 @@ impl AnthropicProvider {
             .tools
             .as_ref()
             .map(|tools| tools.iter().map(AnthropicTool::from).collect());
+        debug!("Tools configured: {:?}", tools);
 
         // Note: For Anthropic, tool_choice is handled through the prompt and context
         // We don't modify the tools list based on the choice
 
         // Convert tool_choice to Anthropic's format
+        debug!("Processing tool_choice: {:?}", chat.tool_choice);
         let tool_choice = if let Some(choice) = &chat.tool_choice {
-            match choice {
-                crate::tool::ToolChoice::Auto => Some(serde_json::json!("auto")),
+            let anthropic_choice = match choice {
+                crate::tool::ToolChoice::Auto => {
+                    debug!("Setting tool_choice to type:auto");
+                    Some(serde_json::json!({ "type": "auto" }))
+                },
                 // Anthropic uses "any" instead of "required" for what we call "Any"
-                crate::tool::ToolChoice::Any => Some(serde_json::json!("any")),
-                crate::tool::ToolChoice::None => Some(serde_json::json!("none")),
+                crate::tool::ToolChoice::Any => {
+                    debug!("Setting tool_choice to type:any");
+                    Some(serde_json::json!({ "type": "any" }))
+                },
+                crate::tool::ToolChoice::None => {
+                    debug!("Setting tool_choice to type:none");
+                    Some(serde_json::json!({ "type": "none" }))
+                },
                 crate::tool::ToolChoice::Specific(name) => {
                     // For specific tool, use this format
+                    debug!("Setting tool_choice to specific tool: {}", name);
                     Some(serde_json::json!({
                         "type": "function",
                         "function": { "name": name }
                     }))
                 }
-            }
+            };
+            debug!("Anthropic tool_choice value: {:?}", anthropic_choice);
+            anthropic_choice
         } else if tools.is_some() {
             // Default to auto if tools are present but no choice specified
-            Some(serde_json::json!("auto"))
+            debug!("No tool_choice specified but tools are present, defaulting to type:auto");
+            Some(serde_json::json!({ "type": "auto" }))
         } else {
+            debug!("No tool_choice and no tools, setting to None");
             None
         };
+        
+        debug!("Final tool_choice value: {:?}", tool_choice);
 
         // Create the request
         debug!("Creating AnthropicRequest");

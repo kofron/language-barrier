@@ -11,7 +11,7 @@ use language_barrier_core::{
 };
 
 use tower_service::Service;
-use tracing::debug;
+use tracing::{debug, field::debug};
 
 use crate::ops::{LlmM, LlmOp};
 
@@ -22,8 +22,10 @@ use super::BoxFuture;
 /// This middleware processes Chat operations in the request pipeline.
 /// It stores a Chat instance, model and provider, creating a fresh HTTP client
 /// for each request via the stateless send_chat_request function.
+#[derive(Clone)]
 pub struct GenerateNextMessageService<S, M, P>
 where
+    S: Clone,
     M: ModelInfo + Clone,
     P: HTTPProvider<M> + Send + Sync + Clone + 'static,
 {
@@ -34,6 +36,7 @@ where
 
 impl<S, M, P> GenerateNextMessageService<S, M, P>
 where
+    S: Clone,
     M: ModelInfo + Clone,
     P: HTTPProvider<M> + Send + Sync + Clone + 'static,
 {
@@ -80,6 +83,7 @@ where
                 Some(LlmOp::GenerateNextMessage { chat, next }) => {
                     debug!("Creating chat");
                     let svc = HTTPLlmService::new(*model, provider);
+                    debug!("Chat has tools configured: {:?}", chat.tools);
                     let response = svc.generate_next_message(&chat).await;
                     debug!("Done, delegating to next");
 

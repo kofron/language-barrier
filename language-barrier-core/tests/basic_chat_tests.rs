@@ -49,7 +49,7 @@ async fn test_request_creation() {
             .with_max_output_tokens(1000)
             .add_message(Message::user("What is the capital of France?"));
 
-        let request = provider.accept(Arc::new(model), Arc::new(chat)).unwrap();
+        let request = provider.accept(model, &chat).unwrap();
         assert_eq!(request.method(), "POST");
         assert_eq!(
             request.url().as_str(),
@@ -73,7 +73,7 @@ async fn test_request_creation() {
             .with_max_output_tokens(1000)
             .add_message(Message::user("What is the capital of France?"));
 
-        let request = provider.accept(Arc::new(model), Arc::new(chat)).unwrap();
+        let request = provider.accept(model, &chat).unwrap();
         assert_eq!(request.method(), "POST");
         assert_eq!(
             request.url().as_str(),
@@ -97,7 +97,7 @@ async fn test_request_creation() {
             .add_message(Message::user("What is the capital of France?"));
 
         // Since Gemini has JSON schema issues, wrap it in a match to prevent test failures
-        match provider.accept(Arc::new(model), Arc::new(chat)) {
+        match provider.accept(model, &chat) {
             Ok(request) => {
                 assert_eq!(request.method(), "POST");
                 assert!(request.url().as_str().contains("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"));
@@ -124,7 +124,7 @@ async fn test_request_creation() {
             .with_max_output_tokens(1000)
             .add_message(Message::user("What is the capital of France?"));
 
-        let request = provider.accept(Arc::new(model), Arc::new(chat)).unwrap();
+        let request = provider.accept(model, &chat).unwrap();
         assert_eq!(request.method(), "POST");
         assert_eq!(
             request.url().as_str(),
@@ -161,7 +161,7 @@ async fn test_basic_chat_integration() {
                 version: Sonnet35Version::V2,
             };
             let service = HTTPLlmService::new(model, Arc::new(provider));
-            
+
             let chat = Chat::new()
                 .with_system_prompt(
                     "You are a helpful AI assistant that provides very short answers.",
@@ -169,7 +169,7 @@ async fn test_basic_chat_integration() {
                 .with_max_output_tokens(100)
                 .add_message(Message::user("What is the capital of France?"));
 
-            if let Ok(response) = service.generate_next_message(chat).await {
+            if let Ok(response) = service.generate_next_message(&chat).await {
                 verify_chat_response(&response);
             } else {
                 warn!("Anthropic test failed, but continuing with other providers");
@@ -189,7 +189,7 @@ async fn test_basic_chat_integration() {
             let provider = OpenAIProvider::with_config(config);
             let model = OpenAi::GPT4o;
             let service = HTTPLlmService::new(model, Arc::new(provider));
-            
+
             let chat = Chat::new()
                 .with_system_prompt(
                     "You are a helpful AI assistant that provides very short answers.",
@@ -197,7 +197,7 @@ async fn test_basic_chat_integration() {
                 .with_max_output_tokens(100)
                 .add_message(Message::user("What is the capital of France?"));
 
-            if let Ok(response) = service.generate_next_message(chat).await {
+            if let Ok(response) = service.generate_next_message(&chat).await {
                 verify_chat_response(&response);
             } else {
                 warn!("OpenAI test failed, but continuing with other providers");
@@ -223,7 +223,7 @@ async fn test_basic_chat_integration() {
                 base_url: "https://api.mistral.ai/v1".to_string(),
             };
             let provider = MistralProvider::with_config(config);
-            let model = Mistral::Small;  // Define the model
+            let model = Mistral::Small; // Define the model
             let svc = HTTPLlmService::new(model.clone(), Arc::new(provider));
             let chat = Chat::new()
                 .with_system_prompt(
@@ -232,7 +232,7 @@ async fn test_basic_chat_integration() {
                 .with_max_output_tokens(100)
                 .add_message(Message::user("What is the capital of France?"));
 
-            if let Ok(response) = svc.generate_next_message(chat).await {
+            if let Ok(response) = svc.generate_next_message(&chat).await {
                 verify_chat_response(&response);
             } else {
                 warn!("Mistral test failed, but continuing with other providers");

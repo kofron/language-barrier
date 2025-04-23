@@ -260,4 +260,9 @@ impl Chat {
             ..self
         }
     }
+
+    /// Return the most recent message in the chat.
+    pub fn most_recent_message(&self) -> Option<&Message> {
+        self.history.last()
+    }
 }

@@ -1,10 +1,10 @@
+use language_barrier_core::llm_service::{HTTPLlmService, LLMService};
 use language_barrier_core::message::{Function, ToolCall};
 use language_barrier_core::model::{Claude, Gemini, Mistral, ModelInfo, OpenAi, Sonnet35Version};
 use language_barrier_core::provider::HTTPProvider;
 use language_barrier_core::{Chat, Message};
-use language_barrier_core::llm_service::{HTTPLlmService, LLMService};
-use std::sync::Arc;
 use parameterized::*;
+use std::sync::Arc;
 use tracing::{Level, info};
 
 // Import our helper modules
@@ -115,9 +115,9 @@ where
     // Try both Paris and London tests, but make them independent
     // Start with Paris
     info!("Testing {}: Paris weather", provider_name);
-    if let Ok(response) = service.generate_next_message(chat_paris).await {
+    if let Ok(response) = service.generate_next_message(&chat_paris).await {
         info!("{} Paris response received", provider_name);
-        
+
         // Check for tool calls
         if let Message::Assistant { tool_calls, .. } = &response {
             assert!(
@@ -133,7 +133,7 @@ where
         } else {
             panic!("Expected assistant message");
         }
-        
+
         info!("{} first test successful", provider_name);
     } else {
         info!("First request couldn't be completed (this is okay)");
@@ -142,10 +142,10 @@ where
     // Test London as a separate test
     info!("Testing {}: London weather", provider_name);
     let chat_london = chat_for_model(model.clone(), "London");
-    
-    if let Ok(response) = service.generate_next_message(chat_london).await {
+
+    if let Ok(response) = service.generate_next_message(&chat_london).await {
         info!("{} London response received", provider_name);
-        
+
         // Check for tool calls and London references
         if let Message::Assistant { tool_calls, .. } = &response {
             assert!(
@@ -161,7 +161,7 @@ where
         } else {
             panic!("Expected assistant message");
         }
-        
+
         info!("{} multi-turn conversation test successful", provider_name);
     } else {
         info!("London request couldn't be completed (this is okay)");
@@ -198,7 +198,7 @@ async fn test_tool_result_conversion() {
             ));
 
         // Create a request using the provider
-        let request = provider.accept(Arc::new(Claude::Haiku3), Arc::new(chat)).unwrap();
+        let request = provider.accept(Claude::Haiku3, &chat).unwrap();
 
         // Get the request body as a string
         let body_bytes = request.body().unwrap().as_bytes().unwrap();
@@ -237,7 +237,7 @@ async fn test_tool_result_conversion() {
             ));
 
         // Create a request using the provider
-        let request = provider.accept(Arc::new(OpenAi::GPT4o), Arc::new(chat)).unwrap();
+        let request = provider.accept(OpenAi::GPT4o, &chat).unwrap();
 
         // Get the request body as a string
         let body_bytes = request.body().unwrap().as_bytes().unwrap();
@@ -269,7 +269,7 @@ async fn test_tool_result_conversion() {
             .add_message(Message::tool("call_789", "Weather in Tokyo: Sunny, 25°C"));
 
         // Create a request using the provider
-        let request = provider.accept(Arc::new(Gemini::Flash20), Arc::new(chat)).unwrap();
+        let request = provider.accept(Gemini::Flash20, &chat).unwrap();
 
         // Get the request body as a string
         let body_bytes = request.body().unwrap().as_bytes().unwrap();
@@ -301,7 +301,7 @@ async fn test_tool_result_conversion() {
             .add_message(Message::tool("call_abc", "Weather in Berlin: Rainy, 15°C"));
 
         // Create a request using the provider
-        let request = provider.accept(Arc::new(Mistral::Small), Arc::new(chat)).unwrap();
+        let request = provider.accept(Mistral::Small, &chat).unwrap();
 
         // Get the request body as a string
         let body_bytes = request.body().unwrap().as_bytes().unwrap();

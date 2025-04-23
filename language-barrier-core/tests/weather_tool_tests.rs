@@ -1,11 +1,11 @@
-use language_barrier_core::{ModelInfo};
+use language_barrier_core::ModelInfo;
 use language_barrier_core::llm_service::{HTTPLlmService, LLMService};
 use language_barrier_core::model::{Claude, Mistral, OpenAi, Sonnet35Version};
 use language_barrier_core::{Chat, Message};
 use parameterized::*;
 use std::sync::Arc;
 use test_tools::WeatherTool;
-use tracing::{Level, info};
+use tracing::{Level, error, info};
 
 // Import our helper modules
 mod test_tools;
@@ -47,8 +47,9 @@ async fn test_tool_anthropic_weather(test_case: Claude) {
 
     // Generate the request
     let service = HTTPLlmService::new(test_case, Arc::new(provider));
-    match service.generate_next_message(chat).await {
+    match service.generate_next_message(&chat).await {
         Ok(Message::Assistant { tool_calls, .. }) => {
+            info!("Finished: {:?}", tool_calls);
             assert!(!tool_calls.is_empty())
         }
         Err(e) => {
@@ -81,7 +82,7 @@ async fn test_tool_openai_weather(test_case: OpenAi) {
 
     // Generate the request
     let service = HTTPLlmService::new(test_case, Arc::new(provider));
-    match service.generate_next_message(chat).await {
+    match service.generate_next_message(&chat).await {
         Ok(Message::Assistant { tool_calls, .. }) => {
             assert!(!tool_calls.is_empty())
         }
@@ -115,13 +116,14 @@ async fn test_tool_mistral_weather(test_case: Mistral) {
 
     // Generate the request
     let service = HTTPLlmService::new(test_case, Arc::new(provider));
-    match service.generate_next_message(chat).await {
+    match service.generate_next_message(&chat).await {
         Ok(Message::Assistant { tool_calls, .. }) => {
             assert!(!tool_calls.is_empty())
         }
         Err(e) => {
             // Log the error but don't fail the test
-            info!("API request had an expected error: {}", e);
+            panic!("Expected assistant message");
+            // error!("API request had an expected error: {}", e);
         }
         _ => {
             panic!("Expected assistant message");

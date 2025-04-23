@@ -1,4 +1,4 @@
-use language_barrier_core::{ModelInfo};
+use language_barrier_core::ModelInfo;
 use language_barrier_core::llm_service::{HTTPLlmService, LLMService};
 use language_barrier_core::model::{Claude, Gemini, Mistral, OpenAi, Sonnet35Version};
 use language_barrier_core::{Chat, Message};
@@ -48,9 +48,9 @@ async fn test_tool_anthropic_calculator(test_case: Claude) {
 
     // Generate the request
     let service = HTTPLlmService::new(test_case, Arc::new(provider));
-    
+
     // Handle both success and error cases
-    match service.generate_next_message(chat).await {
+    match service.generate_next_message(&chat).await {
         Ok(Message::Assistant { tool_calls, .. }) => {
             assert!(!tool_calls.is_empty())
         }
@@ -84,9 +84,9 @@ async fn test_tool_openai_calculator(test_case: OpenAi) {
 
     // Generate the request
     let service = HTTPLlmService::new(test_case, Arc::new(provider));
-    
+
     // Handle both success and error cases
-    match service.generate_next_message(chat).await {
+    match service.generate_next_message(&chat).await {
         Ok(Message::Assistant { tool_calls, .. }) => {
             assert!(!tool_calls.is_empty())
         }
@@ -123,7 +123,7 @@ async fn test_tool_gemini_calculator(test_case: Gemini) {
 
     // For now, we're not testing actual tool call content with Gemini due to schema issues
     // Just swallow any errors and count the test as passed
-    match service.generate_next_message(chat).await {
+    match service.generate_next_message(&chat).await {
         Ok(Message::Assistant { tool_calls, .. }) => {
             assert!(!tool_calls.is_empty())
         }
@@ -157,9 +157,9 @@ async fn test_tool_mistral_calculator(test_case: Mistral) {
 
     // Generate the request
     let service = HTTPLlmService::new(test_case, Arc::new(provider));
-    
+
     // Handle both success and error cases
-    match service.generate_next_message(chat).await {
+    match service.generate_next_message(&chat).await {
         Ok(Message::Assistant { tool_calls, .. }) => {
             assert!(!tool_calls.is_empty())
         }
