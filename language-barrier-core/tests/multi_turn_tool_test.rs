@@ -26,7 +26,7 @@ async fn test_multi_turn_conversation_with_tools() {
     let model = Claude::Sonnet35 {
         version: Sonnet35Version::V2,
     };
-    let chat_sf = Chat::new()
+    let chat_sf = Chat::default()
         .with_system_prompt("You are a helpful AI assistant that can provide weather information.")
         .with_max_output_tokens(1000)
         .with_tool(WeatherTool)
@@ -34,7 +34,7 @@ async fn test_multi_turn_conversation_with_tools() {
         .add_message(Message::user("What's the weather like in San Francisco?"));
 
     // Get the first response (San Francisco)
-    let service = HTTPLlmService::new(model.clone(), Arc::new(provider.clone()));
+    let service = HTTPLlmService::new(model, Arc::new(provider.clone()));
 
     match service.generate_next_message(&chat_sf).await {
         Ok(Message::Assistant { tool_calls, .. }) => {
@@ -55,7 +55,7 @@ async fn test_multi_turn_conversation_with_tools() {
     }
 
     // Create a new chat for New York weather
-    let chat_ny = Chat::new()
+    let chat_ny = Chat::default()
         .with_system_prompt("You are a helpful AI assistant that can provide weather information.")
         .with_max_output_tokens(1000)
         .with_tool(WeatherTool)

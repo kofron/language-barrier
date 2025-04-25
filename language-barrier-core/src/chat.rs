@@ -24,9 +24,8 @@ pub struct Chat {
     pub tool_choice: Option<ToolChoice>,
 }
 
-impl Chat {
-    /// Creates a new Chat instance with a model and provider
-    pub fn new() -> Self {
+impl Default for Chat {
+    fn default() -> Self {
         Self {
             system_prompt: String::new(),
             max_output_tokens: 2048,
@@ -36,7 +35,9 @@ impl Chat {
             tool_choice: None,
         }
     }
+}
 
+impl Chat {
     /// Sets system prompt and returns a new instance
     #[must_use]
     pub fn with_system_prompt(self, prompt: impl Into<String>) -> Self {
@@ -231,15 +232,15 @@ impl Chat {
     /// use language_barrier_core::{Chat, tool::ToolChoice};
     ///
     /// // Require using a tool
-    /// let chat = Chat::new()
+    /// let chat = Chat::default()
     ///     .with_tool_choice(ToolChoice::Any);
     ///
     /// // Specify a tool by name
-    /// let chat = Chat::new()
+    /// let chat = Chat::default()
     ///     .with_tool_choice(ToolChoice::Specific("weather_tool".to_string()));
     ///
     /// // Disable tools for this conversation
-    /// let chat = Chat::new()
+    /// let chat = Chat::default()
     ///     .with_tool_choice(ToolChoice::None);
     /// ```
     #[must_use]

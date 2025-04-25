@@ -5,7 +5,6 @@ use crate::{Chat, LlmToolInfo, Mistral};
 use reqwest::{Method, Request, Url};
 use serde::{Deserialize, Serialize};
 use std::env;
-use std::sync::Arc;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 /// Configuration for the Mistral provider

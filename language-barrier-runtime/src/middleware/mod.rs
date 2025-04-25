@@ -61,7 +61,7 @@ where
                     async move { result.map(|_| panic!("Cannot extract value from Done operation")) },
                 )
             }
-            _ => boxed(async move { Err(Error::Other(format!("Invalid program state").into())) }),
+            _ => boxed(async move { Err(Error::Other("Invalid program state".to_string())) }),
         }
     }
 }

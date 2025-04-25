@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::error::Result;
 use crate::{Chat, Message, ModelInfo};
 

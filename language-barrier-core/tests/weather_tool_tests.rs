@@ -5,7 +5,7 @@ use language_barrier_core::{Chat, Message};
 use parameterized::*;
 use std::sync::Arc;
 use test_tools::WeatherTool;
-use tracing::{Level, error, info};
+use tracing::{Level, info};
 
 // Import our helper modules
 mod test_tools;
@@ -17,7 +17,7 @@ use test_utils::{
 
 /// Creates a chat for testing with the given model
 fn chat_for_model<M: ModelInfo>(_: M) -> Chat {
-    Chat::new()
+    Chat::default()
         .with_system_prompt("You are a helpful AI assistant.")
         .with_max_output_tokens(1000)
         .with_tool(WeatherTool)

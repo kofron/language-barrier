@@ -44,7 +44,7 @@ async fn run_chat() -> language_barrier_core::error::Result<()> {
     ));
 
     // Keep track of conversation history
-    let mut chat = language_barrier_core::chat::Chat::new().with_system_prompt(
+    let mut chat = language_barrier_core::chat::Chat::default().with_system_prompt(
         "You are a helpful assistant. Provide clear and concise answers to the user's questions.",
     );
 

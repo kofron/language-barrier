@@ -18,7 +18,7 @@ use test_utils::{
 
 /// Creates a chat for testing with the given model
 fn chat_for_model<M: ModelInfo>(_: M) -> Chat {
-    Chat::new()
+    Chat::default()
         .with_system_prompt("You are a helpful AI assistant that uses tools when appropriate. Always use the calculator tool for math problems.")
         .with_max_output_tokens(256)
         .with_tool(CalculatorTool)

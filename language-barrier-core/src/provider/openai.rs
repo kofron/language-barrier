@@ -5,7 +5,6 @@ use crate::{Chat, LlmToolInfo, OpenAi};
 use reqwest::{Method, Request, Url};
 use serde::{Deserialize, Serialize};
 use std::env;
-use std::sync::Arc;
 use tracing::{debug, error, info, instrument, trace, warn};
 
 /// Configuration for the OpenAI provider
@@ -155,7 +154,7 @@ impl HTTPProvider<OpenAi> for OpenAIProvider {
 
         // Create the request payload
         debug!("Creating request payload");
-        let payload = match self.create_request_payload(model, &chat) {
+        let payload = match self.create_request_payload(model, chat) {
             Ok(payload) => {
                 debug!("Request payload created successfully");
                 trace!("Model: {}", payload.model);

@@ -11,7 +11,7 @@ use language_barrier_core::{
 };
 
 use tower_service::Service;
-use tracing::{debug, field::debug};
+use tracing::debug;
 
 use crate::ops::{LlmM, LlmOp};
 

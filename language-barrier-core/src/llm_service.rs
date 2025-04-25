@@ -44,7 +44,7 @@ pub trait LLMService<M: ModelInfo> {
 ///     );
 ///
 ///     // Create a chat and generate a response
-///     let chat = Chat::new()
+///     let chat = Chat::default()
 ///         .with_system_prompt("You are a helpful assistant.")
 ///         .add_message(Message::user("Hello, how are you?"));
 ///

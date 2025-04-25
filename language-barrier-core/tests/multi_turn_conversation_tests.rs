@@ -19,7 +19,7 @@ use test_utils::{
 
 /// Creates a chat for testing with the given model
 fn chat_for_model<M: ModelInfo>(_m: M, city: &str) -> Chat {
-    Chat::new()
+    Chat::default()
         .with_system_prompt("You are a helpful AI assistant that can provide weather information.")
         .with_max_output_tokens(1000)
         .with_tool(WeatherTool)
@@ -109,8 +109,8 @@ where
     M: Clone + ModelInfo,
 {
     // Test with Paris
-    let chat_paris = chat_for_model(model.clone(), "Paris");
-    let service = HTTPLlmService::new(model.clone(), Arc::new(provider.clone()));
+    let chat_paris = chat_for_model(model, "Paris");
+    let service = HTTPLlmService::new(model, Arc::new(provider.clone()));
 
     // Try both Paris and London tests, but make them independent
     // Start with Paris
@@ -141,7 +141,7 @@ where
 
     // Test London as a separate test
     info!("Testing {}: London weather", provider_name);
-    let chat_london = chat_for_model(model.clone(), "London");
+    let chat_london = chat_for_model(model, "London");
 
     if let Ok(response) = service.generate_next_message(&chat_london).await {
         info!("{} London response received", provider_name);
@@ -180,7 +180,7 @@ async fn test_tool_result_conversion() {
         let provider = get_anthropic_provider().unwrap_or_default();
 
         // Create a sequence with a tool message
-        let chat = Chat::new()
+        let chat = Chat::default()
             .with_system_prompt("You are a helpful assistant.")
             // Create a tool call
             .add_message(Message::assistant_with_tool_calls(vec![ToolCall {
@@ -219,7 +219,7 @@ async fn test_tool_result_conversion() {
         let provider = get_openai_provider().unwrap_or_default();
 
         // Create a sequence with a tool message
-        let chat = Chat::new()
+        let chat = Chat::default()
             .with_system_prompt("You are a helpful assistant.")
             // Create a tool call
             .add_message(Message::assistant_with_tool_calls(vec![ToolCall {
@@ -254,7 +254,7 @@ async fn test_tool_result_conversion() {
         let provider = get_google_provider().unwrap_or_default();
 
         // Create a sequence with a tool message
-        let chat = Chat::new()
+        let chat = Chat::default()
             .with_system_prompt("You are a helpful assistant.")
             // Create a tool call
             .add_message(Message::assistant_with_tool_calls(vec![ToolCall {
@@ -286,7 +286,7 @@ async fn test_tool_result_conversion() {
         let provider = get_mistral_provider().unwrap_or_default();
 
         // Create a sequence with a tool message
-        let chat = Chat::new()
+        let chat = Chat::default()
             .with_system_prompt("You are a helpful assistant.")
             // Create a tool call
             .add_message(Message::assistant_with_tool_calls(vec![ToolCall {

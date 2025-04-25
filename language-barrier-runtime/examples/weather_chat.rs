@@ -95,13 +95,16 @@ async fn run_weather_chat() -> language_barrier_core::error::Result<()> {
     let base_service = GenerateNextMessageService::new(FinalInterpreter::new(), model, provider);
 
     // Then wrap it with the tool executor middleware using auto-execute mode
-    let mut service =
-        ToolExecutorMiddleware::with_auto_execute(base_service, weather_tool.clone(), weather_fn.clone());
-    
+    let mut service = ToolExecutorMiddleware::with_auto_execute(
+        base_service,
+        weather_tool.clone(),
+        weather_fn.clone(),
+    );
+
     debug!("Created service with auto-execute mode enabled");
 
     // Keep track of conversation history
-    let mut chat = language_barrier_core::chat::Chat::new()
+    let mut chat = language_barrier_core::chat::Chat::default()
         .with_system_prompt("You are a helpful assistant with access to weather information.")
         .with_tool(weather_tool.clone())
         .expect("Failed to add weather tool to chat")

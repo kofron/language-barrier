@@ -44,7 +44,7 @@ async fn test_request_creation() {
         let model = Claude::Sonnet35 {
             version: Sonnet35Version::V2,
         };
-        let chat = Chat::new()
+        let chat = Chat::default()
             .with_system_prompt("You are a helpful AI assistant.")
             .with_max_output_tokens(1000)
             .add_message(Message::user("What is the capital of France?"));
@@ -68,7 +68,7 @@ async fn test_request_creation() {
         info!("Testing OpenAI request creation");
         let provider = OpenAIProvider::new();
         let model = OpenAi::GPT4o;
-        let chat = Chat::new()
+        let chat = Chat::default()
             .with_system_prompt("You are a helpful AI assistant.")
             .with_max_output_tokens(1000)
             .add_message(Message::user("What is the capital of France?"));
@@ -91,7 +91,7 @@ async fn test_request_creation() {
         info!("Testing Gemini request creation");
         let provider = GeminiProvider::new();
         let model = Gemini::Flash20;
-        let chat = Chat::new()
+        let chat = Chat::default()
             .with_system_prompt("You are a helpful AI assistant.")
             .with_max_output_tokens(1000)
             .add_message(Message::user("What is the capital of France?"));
@@ -119,7 +119,7 @@ async fn test_request_creation() {
         info!("Testing Mistral request creation");
         let provider = MistralProvider::new();
         let model = Mistral::Small;
-        let chat = Chat::new()
+        let chat = Chat::default()
             .with_system_prompt("You are a helpful AI assistant.")
             .with_max_output_tokens(1000)
             .add_message(Message::user("What is the capital of France?"));
@@ -162,7 +162,7 @@ async fn test_basic_chat_integration() {
             };
             let service = HTTPLlmService::new(model, Arc::new(provider));
 
-            let chat = Chat::new()
+            let chat = Chat::default()
                 .with_system_prompt(
                     "You are a helpful AI assistant that provides very short answers.",
                 )
@@ -190,7 +190,7 @@ async fn test_basic_chat_integration() {
             let model = OpenAi::GPT4o;
             let service = HTTPLlmService::new(model, Arc::new(provider));
 
-            let chat = Chat::new()
+            let chat = Chat::default()
                 .with_system_prompt(
                     "You are a helpful AI assistant that provides very short answers.",
                 )
@@ -224,8 +224,8 @@ async fn test_basic_chat_integration() {
             };
             let provider = MistralProvider::with_config(config);
             let model = Mistral::Small; // Define the model
-            let svc = HTTPLlmService::new(model.clone(), Arc::new(provider));
-            let chat = Chat::new()
+            let svc = HTTPLlmService::new(model, Arc::new(provider));
+            let chat = Chat::default()
                 .with_system_prompt(
                     "You are a helpful AI assistant that provides very short answers.",
                 )
