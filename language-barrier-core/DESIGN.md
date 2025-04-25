@@ -140,6 +140,89 @@ The tool system design follows our core design principles:
 
 The implementation aligns with the OpenAI function calling format, making it compatible with existing LLM providers while maintaining our abstraction layer.
 
+#### 2025-04-21: Message-Based Runtime Middleware Architecture
+
+1. **Stateless Request Handling**:
+   - Refactored the `ChatMiddleware` to use a stateless request handling pattern
+   - Extracted HTTP request logic from `SingleRequestExecutor` into a standalone `send_chat_request` function
+   - Eliminated the need to share mutable state across async boundaries
+   - Improved ownership model by cloning immutable data before async blocks
+
+2. **Immutable Data Flow**:
+   - Leveraged Chat's immutable builder pattern for efficient data passing
+   - Added `with_tools` method to Chat for bulk tool addition
+   - Redesigned middleware to clone Chat and provider before async blocks 
+   - Used Message as the primary unit of exchange between middleware components
+
+3. **Provider Handling**:
+   - Stored provider as a boxed trait object in the middleware
+   - Properly implemented Clone for middleware by cloning all components
+   - Eliminated the SingleRequestExecutor dependency in the runtime crate
+   - Created a clean separation between core functionality and HTTP transport
+
+4. **Tower Integration Improvements**:
+   - Fixed ownership issues in the Tower Service implementation
+   - Better aligned with Tower's middleware philosophy
+   - Made middleware components properly clonable
+   - Ensured all data needed in async blocks is owned, not borrowed
+
+This architecture improves:
+- **Ownership clarity**: Clean separation between owned and borrowed data
+- **Async compatibility**: No shared mutable state across async boundaries
+- **Immutability**: Leverages Chat's immutable builder pattern
+- **Simplicity**: Direct message passing with clear ownership
+
+It enables more complex middleware compositions while maintaining a clean, Rust-idiomatic design that works well with both the Tower service architecture and Rust's ownership model.
+
+Key implementation details:
+
+1. **Stateless Request Function**:
+   - Created a standalone `send_chat_request` function that takes a Chat, provider reference, and optional client
+   - Function handles the entire HTTP request/response cycle with proper error handling
+   - No stored state between requests, everything is passed in as arguments
+
+2. **Chat-Based Middleware Storage**:
+   - Store the complete Chat instance directly in the middleware
+   - Handle Chat's lack of Clone by manually recreating it when needed
+   - Provide convenient constructors and builder methods for configuration
+   - Allow direct reuse of existing Chat instances
+
+3. **Service Implementation Improvements**:
+   - Fixed trait bounds with appropriate Clone and Default implementations
+   - Added Clone for FinalInterpreter and Default for Claude
+   - Ensured proper ownership of all data in async contexts
+   - Added comprehensive unit tests for middleware functionality
+
+The implementation addresses all the original ownership issues while maintaining clean abstractions and separation of concerns. It sets the stage for further Tower middleware development and more sophisticated LLM request pipelines.
+
+#### 2025-04-22: Tower Middleware Refactoring - Chat Storage
+
+1. **Direct Chat Storage**:
+   - Modified middleware to store the Chat instance directly instead of separate components
+   - Improved API by adding a `with_chat` method for direct Chat instance reuse
+   - Enhanced middleware to use the same immutable builder pattern as Chat
+   - All Chat configuration is now done directly on the stored Chat instance
+
+2. **Custom Clone Implementation**:
+   - Addressed Chat's lack of Clone by implementing custom cloning logic
+   - Carefully recreated Chat instances with all settings preserved
+   - Ensured history, tools, and configuration are properly maintained
+   - Added detailed comments explaining this manual cloning approach
+
+3. **Async Boundary Improvements**:
+   - All data needed in async blocks is properly moved or cloned
+   - No borrowing across async boundaries occurs
+   - Simpler and more predictable ownership model
+   - Better alignment with Rust's ownership system
+
+This refactoring offers several advantages:
+- **Simplified API**: Users can directly work with Chat instances they're familiar with
+- **Improved consistency**: Middleware follows the same patterns as the core crate
+- **Better flexibility**: Easy to configure with existing or new Chat instances
+- **Clear data flow**: Chat is the primary data structure throughout the system
+
+The biggest challenge was handling Chat's lack of a Clone implementation, which we solved by manually recreating instances when needed. This approach works well with Chat's immutable builder pattern, where each method returns a new instance rather than modifying in place.
+
 #### 2025-04-17: Anthropic Provider Implementation
 
 1. **Anthropic API Integration**:
@@ -988,6 +1071,120 @@ This implementation follows our core design principles:
 - **Extensibility**: The approach allows for future expansion of tool choice strategies
 - **Backward compatibility**: Existing code continues to work as before
 
+#### 2025-04-21: Message-Based Operations
+
+1. **New AddMessage Operation**:
+   - Added a new `LlmOp::AddMessage` variant to the free monad operations
+   - Operation accepts a boxed Chat instance and a Message to add
+   - Returns the updated Chat instance as a boxed Any type
+   - Ensures all Chat updates remain immutable and follow the builder pattern
+   - Streamlines Chat management in the middleware layer
+
+2. **Implementation Details**:
+   - **Using std::any::Any**:
+     - Leveraged Rust's `Any` trait to pass typed Chat objects through the operations
+     - Used downcast to recover the specific Chat type with proper error handling
+     - Maintains type safety while avoiding excessive generics in the op types
+   
+   - **Message Helpers**:
+     - Added convenience functions for creating common message types
+     - `user_message()` for user messages with text content
+     - `named_user_message()` for user messages with a name
+     - `system_message()` for system instructions
+     - Simplified common message creation patterns
+
+   - **ChatMiddleware Handling**:
+     - Added implementation for the AddMessage operation in ChatMiddleware
+     - Properly handles type safety through downcasting
+     - Creates new Chat instance immutably with the added message
+     - Returns the updated Chat for further operations
+
+3. **Benefits of Message-Based Operations**:
+   - **Reduced Cloning**: Avoids repeated cloning of entire Chat history when only adding a message
+   - **More Granular Operations**: Fine-grained control over conversation updates
+   - **Cleaner API**: Simplifies common patterns with helper functions
+   - **Immutability Preservation**: Maintains the immutable builder pattern throughout
+   - **Composition**: Operations can be easily composed with `and_then` and other combinators
+
+4. **Testing**:
+   - Added comprehensive tests for the new operation
+   - Verified that messages are properly added to Chat instances
+   - Tested helper functions for correct message creation
+   - Ensured proper error handling for incorrect Chat types
+
+This enhancement offers a more fine-grained approach to manipulating conversations with LLMs, allowing applications to add messages to Chat instances without having to recreate the entire message history. It follows the immutable builder pattern used throughout the codebase while providing a more efficient and composable API for conversation management.
+
+#### 2025-04-21: Simple Chat Application Implementation
+
+1. **Interactive Terminal Chat**:
+   - Implemented a complete interactive chat application using the Tower middleware architecture
+   - Uses the free monad operations pattern from the runtime crate
+   - Provides a user-friendly command-line interface for conversations
+   - Showcases the end-to-end functionality of the library
+
+2. **Key Components**:
+   - **Tower Middleware Stack**: Configures a practical middleware pipeline
+   - **Anthropic Provider**: Demonstrates real-world use with Claude Opus
+   - **Conversation Loop**: Shows how to manage multi-turn conversations
+   - **Operation Composition**: Uses `add_message` and `chat` operations together
+   - **State Management**: Properly manages conversation history
+
+3. **Design Benefits**:
+   - **Clean Separation**: Operations defined separately from execution
+   - **Immutable State**: Uses the immutable builder pattern throughout 
+   - **Type Safety**: Leverages strongly typed operations
+   - **Error Handling**: Proper propagation of errors from middleware
+
+4. **User Experience Considerations**:
+   - Simple command-line interface with clear prompts
+   - Maintains conversation context between turns
+   - Provides helpful instructions and error handling
+   - Clean exit mechanism
+
+The implementation serves as a practical demonstration of the runtime crate's capabilities and provides a template for building more complex LLM-powered applications. It showcases how the free monad pattern and Tower middleware can create a clean, maintainable architecture for LLM applications.
+
+#### 2025-04-22: Splitting State from Behavior with LLMService
+
+1. **Chat as Plain Old Data**:
+   - Removed the generic parameter `M` from Chat, making it a POD (Plain Old Data) struct
+   - Chat now holds only conversation state: system prompt, history, tokens, tools, etc.
+   - No longer tied to specific model or provider implementations
+   - Streamlined creation and management of conversations
+   - Makes Chat easier to serialize/deserialize and share between components
+
+2. **New LLMService Trait**:
+   - Introduced the `LLMService<M: ModelInfo>` trait for message generation
+   - Provides a clean separation between conversation state (Chat) and generation behavior
+   - Moves the "how" of message generation out of Chat into dedicated service implementations
+   - Single method `generate_next_message(&self, chat: Chat) -> Result<Message>`
+   - Enables different ways to generate messages with the same Chat (HTTP, local, streaming, etc.)
+
+3. **HTTPLlmService Implementation**:
+   - Implemented `HTTPLlmService<M: ModelInfo>` for HTTP-based providers
+   - Encapsulates the model and provider needed for HTTP requests
+   - Cleanly replaces the `SingleRequestExecutor` while maintaining its functionality
+   - Simplified construction with `new(model: M, provider: Arc<dyn HTTPProvider<M>>)`
+   - Improved provider interface with Arc-based parameters
+
+4. **Provider Interface Updates**:
+   - Updated the `HTTPProvider<M>` trait to accept Arc references:
+   ```rust
+   fn accept(&self, model: Arc<M>, chat: Arc<Chat>) -> Result<Request>;
+   ```
+   - Better ownership model that reduces cloning of potentially large Chat objects
+   - More efficient memory usage, especially for large conversations
+   - Cleaner implementation in providers by eliminating lifetimes
+
+5. **Benefits of the Redesign**:
+   - **Separation of Concerns**: Clean separation between state (Chat) and behavior (services)
+   - **Simplicity**: Chat is now a straightforward data structure without complex generics
+   - **Flexibility**: Different service implementations can work with the same Chat
+   - **Memory Efficiency**: Better handling of large Chat objects through Arc references
+   - **Compatibility**: Maintains the same external API while improving internal design
+   - **Testability**: Easier to test Chat functionality independently from services
+
+The refactoring represents a significant architectural improvement that better aligns with Rust idioms and design principles. By separating the conversation state from the message generation behavior, we've created a more modular and flexible system that will be easier to extend with new capabilities like streaming, local model support, and more specialized service implementations.
+
 ## Future Directions
 
 1. **Streaming**: Support for streaming responses from LLMs.
@@ -1002,7 +1199,8 @@ This implementation follows our core design principles:
 10. **Proper Tokenization**: Replace the naive token counter with proper model-specific tokenizers.
 11. **Full Transport Integration**: Complete the transport visitor pattern implementation for all providers.
 12. **Comprehensive Integration Testing**: Expand integration tests to cover all features including tools, streaming, and vision capabilities.
-13. **Tool Runtime Implementation**: Implement the execution system for tools in the runtime crate. (Completed; see below)
+13. **Tool Runtime Implementation**: Implement the execution system for tools in the runtime crate. (Completed; see above)
+14. **Simple Chat Application**: Basic interactive chat for terminal. (Completed; see above)
 
 ## Implementation Notes
 

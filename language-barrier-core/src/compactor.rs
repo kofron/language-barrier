@@ -1,7 +1,7 @@
 use crate::token::TokenCounter;
 
 /// Trait for compacting chat history
-pub trait ChatHistoryCompactor {
+pub trait ChatHistoryCompactor: Send + Sync + Clone {
     /// Compacts the chat history to fit within a token budget
     ///
     /// This method should modify the history in place, removing
@@ -69,7 +69,8 @@ impl ChatHistoryCompactor for DropOldestCompactor {
                         }
                     }
                 }
-                crate::message::Message::System { content, .. } | crate::message::Message::Tool { content, .. } => {
+                crate::message::Message::System { content, .. }
+                | crate::message::Message::Tool { content, .. } => {
                     counter.subtract(content);
                 }
             }
@@ -80,7 +81,7 @@ impl ChatHistoryCompactor for DropOldestCompactor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     use crate::message::Message;
 
     #[test]

@@ -2,15 +2,13 @@ use crate::compactor::{ChatHistoryCompactor, DropOldestCompactor};
 use crate::message::{Content, Message};
 use crate::token::TokenCounter;
 use crate::tool::{LlmToolInfo, ToolChoice};
-use crate::{ModelInfo, Result, ToolDefinition};
+use crate::{Result, ToolDefinition};
 
 /// The main Chat client that users will interact with.
 /// All methods return a new instance rather than mutating the existing one,
 /// following the immutable builder pattern.
-pub struct Chat<M: ModelInfo> {
-    // Immutable after construction
-    pub model: M,
-
+#[derive(Clone, Debug)]
+pub struct Chat {
     // Tunable knobs / state
     pub system_prompt: String,
     pub max_output_tokens: usize,
@@ -18,47 +16,41 @@ pub struct Chat<M: ModelInfo> {
     // History and token tracking
     pub history: Vec<Message>,
     token_counter: TokenCounter,
-    #[allow(dead_code)]
-    compactor: Box<dyn ChatHistoryCompactor>,
 
     // Registry for type-safe tool definitions (optional)
     pub tools: Option<Vec<LlmToolInfo>>,
-    
+
     // Tool execution settings
     pub tool_choice: Option<ToolChoice>,
 }
 
-impl<M> Chat<M>
-where
-    M: ModelInfo,
-{
-    /// Creates a new Chat instance with a model and provider
-    pub fn new(model: M) -> Self {
+impl Default for Chat {
+    fn default() -> Self {
         Self {
-            model,
             system_prompt: String::new(),
             max_output_tokens: 2048,
             history: Vec::new(),
             token_counter: TokenCounter::default(),
-            compactor: Box::<DropOldestCompactor>::default(),
             tools: None,
             tool_choice: None,
         }
     }
+}
 
+impl Chat {
     /// Sets system prompt and returns a new instance
     #[must_use]
     pub fn with_system_prompt(self, prompt: impl Into<String>) -> Self {
         let p = prompt.into();
         let mut token_counter = self.token_counter.clone();
         token_counter.observe(&p);
-        
+
         let mut new_chat = Self {
             system_prompt: p,
             token_counter,
             ..self
         };
-        
+
         new_chat = new_chat.trim_to_context_window();
         new_chat
     }
@@ -77,10 +69,10 @@ where
     pub fn with_history(self, history: Vec<Message>) -> Self {
         // Create a new token counter from scratch
         let mut token_counter = TokenCounter::default();
-        
+
         // Count tokens in system prompt
         token_counter.observe(&self.system_prompt);
-        
+
         // Count tokens in message history
         for msg in &history {
             match msg {
@@ -99,25 +91,13 @@ where
                 }
             }
         }
-        
+
         let mut new_chat = Self {
             history,
             token_counter,
             ..self
         };
-        
-        new_chat = new_chat.trim_to_context_window();
-        new_chat
-    }
 
-    /// Sets compactor and returns a new instance
-    #[must_use]
-    pub fn with_compactor<C: ChatHistoryCompactor + 'static>(self, comp: C) -> Self {
-        let mut new_chat = Self {
-            compactor: Box::new(comp),
-            ..self
-        };
-        
         new_chat = new_chat.trim_to_context_window();
         new_chat
     }
@@ -127,7 +107,7 @@ where
     pub fn add_message(self, msg: Message) -> Self {
         let mut token_counter = self.token_counter.clone();
         let mut history = self.history.clone();
-        
+
         // Count tokens based on message type
         match &msg {
             Message::User { content, .. } => {
@@ -144,19 +124,19 @@ where
                 token_counter.observe(content);
             }
         }
-        
+
         history.push(msg);
-        
+
         let mut new_chat = Self {
             history,
             token_counter,
             ..self
         };
-        
+
         new_chat = new_chat.trim_to_context_window();
         new_chat
     }
-    
+
     /// Alias for `add_message` for backward compatibility
     #[must_use]
     pub fn push_message(self, msg: Message) -> Self {
@@ -167,22 +147,21 @@ where
     #[must_use]
     fn trim_to_context_window(self) -> Self {
         const MAX_TOKENS: usize = 32_768; // could be model-specific
-        
+
         let mut history = self.history.clone();
         let mut token_counter = self.token_counter.clone();
-        
+
         // Create a fresh compactor of the same default type
         // Note: In a real implementation, you would want a way to clone the compactor
         // or to properly reconstruct the specific type that was being used.
         let new_compactor = Box::<DropOldestCompactor>::default();
-        
+
         // Use the compactor to trim history
         new_compactor.compact(&mut history, &mut token_counter, MAX_TOKENS);
-        
+
         Self {
             history,
             token_counter,
-            compactor: new_compactor as Box<dyn ChatHistoryCompactor>,
             ..self
         }
     }
@@ -200,21 +179,35 @@ where
             description: tool.description(),
             parameters: tool.schema()?,
         };
-        
+
         let tools = match self.tools {
             Some(mut tools) => {
                 tools.push(info);
                 Some(tools)
-            },
+            }
             None => Some(vec![info]),
         };
-        
-        let new_chat = Self {
-            tools,
-            ..self
-        };
+
+        let new_chat = Self { tools, ..self };
 
         Ok(new_chat)
+    }
+
+    /// Add multiple tools at once and return a new instance with the tools added
+    #[must_use = "This returns a new Chat with the tools added"]
+    pub fn with_tools(self, tools: Vec<LlmToolInfo>) -> Self {
+        let new_tools = match self.tools {
+            Some(mut existing_tools) => {
+                existing_tools.extend(tools);
+                Some(existing_tools)
+            }
+            None => Some(tools),
+        };
+
+        Self {
+            tools: new_tools,
+            ..self
+        }
     }
 
     /// Sets the tool choice strategy and returns a new instance
@@ -237,18 +230,17 @@ where
     ///
     /// ```
     /// use language_barrier_core::{Chat, tool::ToolChoice};
-    /// use language_barrier_core::model::Claude;
     ///
     /// // Require using a tool
-    /// let chat = Chat::new(Claude::Opus3)
+    /// let chat = Chat::default()
     ///     .with_tool_choice(ToolChoice::Any);
     ///
     /// // Specify a tool by name
-    /// let chat = Chat::new(Claude::Opus3)
+    /// let chat = Chat::default()
     ///     .with_tool_choice(ToolChoice::Specific("weather_tool".to_string()));
     ///
     /// // Disable tools for this conversation
-    /// let chat = Chat::new(Claude::Opus3)
+    /// let chat = Chat::default()
     ///     .with_tool_choice(ToolChoice::None);
     /// ```
     #[must_use]
@@ -268,5 +260,10 @@ where
             tool_choice: None,
             ..self
         }
+    }
+
+    /// Return the most recent message in the chat.
+    pub fn most_recent_message(&self) -> Option<&Message> {
+        self.history.last()
     }
 }

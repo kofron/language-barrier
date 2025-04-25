@@ -1,7 +1,7 @@
 use crate::error::{Error, Result};
 use crate::message::{Content, ContentPart, Message};
 use crate::provider::HTTPProvider;
-use crate::{Chat, LlmToolInfo, ModelInfo};
+use crate::{Chat, LlmToolInfo, Mistral};
 use reqwest::{Method, Request, Url};
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -89,9 +89,9 @@ pub trait MistralModelInfo {
     fn mistral_model_id(&self) -> String;
 }
 
-impl<M: ModelInfo + MistralModelInfo> HTTPProvider<M> for MistralProvider {
-    fn accept(&self, chat: Chat<M>) -> Result<Request> {
-        info!("Creating request for Mistral model: {:?}", chat.model);
+impl HTTPProvider<Mistral> for MistralProvider {
+    fn accept(&self, model: Mistral, chat: &Chat) -> Result<Request> {
+        info!("Creating request for Mistral model: {:?}", model);
         debug!("Messages in chat history: {}", chat.history.len());
 
         let url_str = format!("{}/chat/completions", self.config.base_url);
@@ -139,7 +139,7 @@ impl<M: ModelInfo + MistralModelInfo> HTTPProvider<M> for MistralProvider {
 
         // Create the request payload
         debug!("Creating request payload");
-        let payload = match self.create_request_payload(&chat) {
+        let payload = match self.create_request_payload(model, chat) {
             Ok(payload) => {
                 debug!("Request payload created successfully");
                 trace!("Model: {}", payload.model);
@@ -232,16 +232,13 @@ impl MistralProvider {
     /// This method converts the Chat's messages and settings into a Mistral-specific
     /// format for the API request.
     #[instrument(skip(self, chat), level = "debug")]
-    fn create_request_payload<M: ModelInfo + MistralModelInfo>(
-        &self,
-        chat: &Chat<M>,
-    ) -> Result<MistralRequest> {
+    fn create_request_payload(&self, model: Mistral, chat: &Chat) -> Result<MistralRequest> {
         info!("Creating request payload for chat with Mistral model");
         debug!("System prompt length: {}", chat.system_prompt.len());
         debug!("Messages in history: {}", chat.history.len());
         debug!("Max output tokens: {}", chat.max_output_tokens);
 
-        let model_id = chat.model.mistral_model_id();
+        let model_id = model.mistral_model_id();
         debug!("Using model ID: {}", model_id);
 
         // Convert all messages including system prompt

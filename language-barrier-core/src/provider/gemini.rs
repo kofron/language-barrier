@@ -1,7 +1,7 @@
 use crate::error::{Error, Result};
 use crate::message::{Content, ContentPart, Message};
 use crate::provider::HTTPProvider;
-use crate::{Chat, LlmToolInfo, ModelInfo};
+use crate::{Chat, Gemini, LlmToolInfo};
 use reqwest::{Method, Request, Url};
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -84,12 +84,12 @@ impl Default for GeminiProvider {
     }
 }
 
-impl<M: ModelInfo + GeminiModelInfo> HTTPProvider<M> for GeminiProvider {
-    fn accept(&self, chat: Chat<M>) -> Result<Request> {
-        info!("Creating request for Gemini model: {:?}", chat.model);
+impl HTTPProvider<Gemini> for GeminiProvider {
+    fn accept(&self, model: Gemini, chat: &Chat) -> Result<Request> {
+        info!("Creating request for Gemini model: {:?}", model);
         debug!("Messages in chat history: {}", chat.history.len());
 
-        let model_id = chat.model.gemini_model_id();
+        let model_id = model.gemini_model_id();
         let url_str = format!(
             "{}/models/{}:generateContent?key={}",
             self.config.base_url, model_id, self.config.api_key
@@ -128,7 +128,7 @@ impl<M: ModelInfo + GeminiModelInfo> HTTPProvider<M> for GeminiProvider {
 
         // Create the request payload
         debug!("Creating request payload");
-        let payload = match self.create_request_payload(&chat) {
+        let payload = match self.create_request_payload(model, chat) {
             Ok(payload) => {
                 debug!("Request payload created successfully");
                 trace!("Number of contents: {}", payload.contents.len());
@@ -222,10 +222,7 @@ impl GeminiProvider {
     /// This method converts the Chat's messages and settings into a Gemini-specific
     /// format for the API request.
     #[instrument(skip(self, chat), level = "debug")]
-    fn create_request_payload<M: ModelInfo + GeminiModelInfo>(
-        &self,
-        chat: &Chat<M>,
-    ) -> Result<GeminiRequest> {
+    fn create_request_payload(&self, model: Gemini, chat: &Chat) -> Result<GeminiRequest> {
         info!("Creating request payload for chat with Gemini model");
         debug!("System prompt length: {}", chat.system_prompt.len());
         debug!("Messages in history: {}", chat.history.len());
@@ -364,13 +361,10 @@ impl GeminiProvider {
         // Convert tool descriptions if a tool registry is provided
         let tools = chat.tools.as_ref().map(|tools| {
             vec![GeminiTool {
-                function_declarations: tools
-                    .iter()
-                    .map(GeminiFunctionDeclaration::from)
-                    .collect(),
+                function_declarations: tools.iter().map(GeminiFunctionDeclaration::from).collect(),
             }]
         });
-        
+
         // Note: For Gemini, tool_choice is handled through the API's behavior
         // We don't modify the tools list based on the choice
 
