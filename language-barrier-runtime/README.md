@@ -1,5 +1,7 @@
 # Language Barrier Runtime
 
+NB: This is an EXPERIMENTAL crate.  All of the code is 100% subject to change and may or may not actually work.  You have been warned.
+
 A flexible, composable runtime for language model operations based on free monads and Tower middleware.
 
 ## Overview
@@ -99,14 +101,14 @@ let mut registry = ToolRegistry::new();
 registry.register_with_executor(WeatherTool, |tool, value| {
     // Parse input
     let input: WeatherInput = serde_json::from_value(value)?;
-    
+
     // Execute tool
     let output = WeatherOutput {
         temperature: 22,
         unit: input.unit,
         conditions: "sunny".to_string(),
     };
-    
+
     // Serialize output
     let json = serde_json::to_string(&output)?;
     Ok(json)
