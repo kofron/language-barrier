@@ -48,7 +48,7 @@ pub trait LLMService<M: ModelInfo> {
 ///         .with_system_prompt("You are a helpful assistant.")
 ///         .add_message(Message::user("Hello, how are you?"));
 ///
-///     let response = service.generate_next_message(chat).await?;
+///     let response = service.generate_next_message(&chat).await?;
 ///
 ///     Ok(())
 /// }
