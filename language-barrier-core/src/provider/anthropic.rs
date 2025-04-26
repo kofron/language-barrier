@@ -400,6 +400,16 @@ pub(crate) enum AnthropicContentPart {
     /// Tool result content (for tool responses)
     #[serde(rename = "tool_result")]
     ToolResult(AnthropicToolResponse),
+    /// Tool use content (for tool calls initiated by the assistant)
+    #[serde(rename = "tool_use")]
+    ToolUse {
+        /// The ID of the tool use/call
+        id: String,
+        /// Name of the function/tool being invoked
+        name: String,
+        /// Parsed JSON arguments passed to the tool
+        input: serde_json::Value,
+    },
 }
 
 impl AnthropicContentPart {
@@ -561,18 +571,48 @@ impl From<&Message> for AnthropicMessage {
                     })
                     .collect(),
             },
-            Message::Assistant { content, .. } => match content {
-                Some(Content::Text(text)) => vec![AnthropicContentPart::text(text.clone())],
-                Some(Content::Parts(parts)) => parts
-                    .iter()
-                    .map(|part| match part {
-                        ContentPart::Text { text } => AnthropicContentPart::text(text.clone()),
-                        ContentPart::ImageUrl { image_url } => {
-                            AnthropicContentPart::image(image_url.url.clone())
-                        }
-                    })
-                    .collect(),
-                None => vec![AnthropicContentPart::text(String::new())],
+            Message::Assistant {
+                content,
+                tool_calls,
+                ..
+            } => {
+                // Start with any textual or multimodal content parts, if provided
+                let mut parts: Vec<AnthropicContentPart> = match content {
+                    Some(Content::Text(text)) => vec![AnthropicContentPart::text(text.clone())],
+                    Some(Content::Parts(parts)) => parts
+                        .iter()
+                        .map(|part| match part {
+                            ContentPart::Text { text } => AnthropicContentPart::text(text.clone()),
+                            ContentPart::ImageUrl { image_url } => {
+                                AnthropicContentPart::image(image_url.url.clone())
+                            }
+                        })
+                        .collect(),
+                    None => Vec::new(),
+                };
+
+                // Add any tool_use blocks corresponding to tool calls
+                for call in tool_calls {
+                    let parsed_args: serde_json::Value =
+                        serde_json::from_str(&call.function.arguments).unwrap_or_else(|_| {
+                            // Fallback to a raw string if JSON parsing fails
+                            serde_json::Value::String(call.function.arguments.clone())
+                        });
+
+                    parts.push(AnthropicContentPart::ToolUse {
+                        id: call.id.clone(),
+                        name: call.function.name.clone(),
+                        input: parsed_args,
+                    });
+                }
+
+                // If no parts were generated (unlikely but possible), create a
+                // single text part with some minimal content to satisfy the API.
+                if parts.is_empty() {
+                    parts.push(AnthropicContentPart::text("(no content)".to_string()));
+                }
+
+                parts
             },
             Message::Tool {
                 tool_call_id,
@@ -1005,6 +1045,45 @@ mod tests {
                 assert_eq!(metadata["output_tokens"], 15);
             }
             _ => panic!("Expected Assistant variant"),
+        }
+    }
+
+    #[test]
+    fn test_assistant_message_with_tool_calls_converts_to_tool_use_blocks() {
+        // Build an assistant message that has no textual content but contains a tool call
+        use crate::message::{Function, ToolCall};
+
+        let tool_call = ToolCall {
+            id: "toolu_123".to_string(),
+            tool_type: "function".to_string(),
+            function: Function {
+                name: "observe".to_string(),
+                arguments: "{\"delay\":{\"delay_seconds\":0.0}}".to_string(),
+            },
+        };
+
+        let assistant_msg = Message::assistant_with_tool_calls(vec![tool_call.clone()]);
+
+        // Convert to AnthropicMessage
+        let anthropic_msg = AnthropicMessage::from(&assistant_msg);
+
+        // The assistant role should remain assistant
+        assert_eq!(anthropic_msg.role, "assistant");
+
+        // There should be exactly one content block corresponding to the tool use
+        assert_eq!(anthropic_msg.content.len(), 1);
+
+        match &anthropic_msg.content[0] {
+            AnthropicContentPart::ToolUse { id, name, input } => {
+                assert_eq!(id, &tool_call.id);
+                assert_eq!(name, &tool_call.function.name);
+
+                // Parse the JSON arguments to compare
+                let expected: serde_json::Value =
+                    serde_json::from_str(&tool_call.function.arguments).unwrap();
+                assert_eq!(input, &expected);
+            }
+            _ => panic!("Expected first content block to be a tool_use"),
         }
     }
 
