@@ -282,7 +282,86 @@ impl OpenAIProvider {
             messages.push(OpenAIMessage::from(msg));
         }
 
-        debug!("Converted {} messages for the request", messages.len());
+        // OpenAI requires that every message with role "tool" directly follows the
+        // corresponding assistant message that contains a matching `tool_call`.
+        // When callers accidentally provide the messages in a different order
+        // (for example: user → *tool* → assistant) the API rejects the request
+        // with a 400:
+        //   "messages with role 'tool' must be a response to a preceeding message \
+        //    with 'tool_calls'".
+        //
+        // To make the client more robust we perform a best-effort re-ordering pass
+        // so that each tool response is immediately preceded by its initiating
+        // assistant message.  If we *cannot* find the corresponding assistant
+        // message we treat this as a programming error and bail out early with
+        // `Error::Other`.
+
+        debug!("Re-ordering assistant / tool messages to satisfy OpenAI requirements");
+
+        let mut i = 0;
+        while i < messages.len() {
+            // SAFETY: we only read, not mutate, inside the first borrow scope.
+            if messages[i].role == "tool" {
+                let tool_call_id_opt = messages[i].tool_call_id.clone();
+
+                if let Some(ref tool_call_id) = tool_call_id_opt {
+                    let has_preceding_assistant = if i == 0 {
+                        false
+                    } else {
+                        let prev = &messages[i - 1];
+                        prev.role == "assistant"
+                            && prev.tool_calls.as_ref().map_or(false, |calls| {
+                                calls.iter().any(|c| c.id == *tool_call_id)
+                            })
+                    };
+
+                    if !has_preceding_assistant {
+                        // Look ahead for the matching assistant message
+                        if let Some(pos) = messages.iter().enumerate().skip(i + 1).find_map(|(j, m)| {
+                            if m.role == "assistant" {
+                                if let Some(calls) = &m.tool_calls {
+                                    if calls.iter().any(|c| c.id == *tool_call_id) {
+                                        return Some(j);
+                                    }
+                                }
+                            }
+                            None
+                        }) {
+                            debug!(
+                                "Found assistant (index {}) corresponding to tool message (index {}), re-ordering",
+                                pos, i
+                            );
+                            let assistant_msg = messages.remove(pos);
+                            messages.insert(i, assistant_msg);
+                            // After inserting, the tool message is now at i+1, so we
+                            // advance past both.
+                            i += 2;
+                            continue;
+                        } else {
+                            error!(
+                                "Orphaned tool message with id '{}' at index {} (no matching assistant)",
+                                tool_call_id, i
+                            );
+                            return Err(crate::error::Error::Other(
+                                format!(
+                                    "Tool message with id '{}' has no corresponding assistant message",
+                                    tool_call_id
+                                ),
+                            ));
+                        }
+                    }
+                } else {
+                    // Tool message without id is invalid – drop it.
+                    error!("Tool message without tool_call_id at index {}", i);
+                    return Err(crate::error::Error::Other(
+                        "Tool message missing tool_call_id".to_string(),
+                    ));
+                }
+            }
+            i += 1;
+        }
+
+        debug!("Converted {} messages for the request after re-ordering", messages.len());
 
         // Add tools if present
         let tools = chat
@@ -858,5 +937,61 @@ mod tests {
         let error = error_response.error.unwrap();
         assert_eq!(error.error_type, "invalid_request_error");
         assert_eq!(error.code, Some("model_not_found".to_string()));
+    }
+
+    #[test]
+    fn test_tool_messages_reordered() {
+        use crate::message::{Function, ToolCall};
+        use crate::model::OpenAi;
+        use crate::Chat;
+
+        let tool_call_id = "call_123";
+
+        // Build chat with invalid order: user -> tool -> assistant(tool_calls)
+        let chat = Chat::default()
+            .add_message(crate::message::Message::user("hello"))
+            .add_message(crate::message::Message::tool(tool_call_id, "OK"))
+            .add_message(crate::message::Message::assistant_with_tool_calls(vec![ToolCall {
+                id: tool_call_id.to_string(),
+                tool_type: "function".to_string(),
+                function: Function {
+                    name: "respond_chat".to_string(),
+                    arguments: "{}".to_string(),
+                },
+            }]));
+
+        let provider = OpenAIProvider::new();
+        let model = OpenAi::GPT35Turbo;
+
+        // Use the private method directly (we are in the same module).
+        let request = provider
+            .create_request_payload(model, &chat)
+            .expect("payload generation failed");
+
+        let roles: Vec<_> = request.messages.iter().map(|m| m.role.as_str()).collect();
+
+        // Expected order: user, assistant, tool
+        let user_idx = roles.iter().position(|r| *r == "user").unwrap();
+        let assistant_idx = roles.iter().position(|r| *r == "assistant").unwrap();
+        let tool_idx = roles.iter().position(|r| *r == "tool").unwrap();
+
+        assert!(assistant_idx > user_idx);
+        assert!(tool_idx > assistant_idx);
+    }
+
+    #[test]
+    fn test_orphan_tool_returns_error() {
+        use crate::Chat;
+
+        // tool message without matching assistant
+        let chat = Chat::default()
+            .add_message(crate::message::Message::user("hello"))
+            .add_message(crate::message::Message::tool("call_999", "OK"));
+
+        let provider = OpenAIProvider::new();
+        let model = crate::model::OpenAi::GPT35Turbo;
+
+        let res = provider.create_request_payload(model, &chat);
+        assert!(res.is_err(), "Expected error for orphaned tool");
     }
 }
