@@ -310,23 +310,26 @@ impl OpenAIProvider {
                     } else {
                         let prev = &messages[i - 1];
                         prev.role == "assistant"
-                            && prev.tool_calls.as_ref().map_or(false, |calls| {
-                                calls.iter().any(|c| c.id == *tool_call_id)
-                            })
+                            && prev
+                                .tool_calls
+                                .as_ref()
+                                .is_some_and(|calls| calls.iter().any(|c| c.id == *tool_call_id))
                     };
 
                     if !has_preceding_assistant {
                         // Look ahead for the matching assistant message
-                        if let Some(pos) = messages.iter().enumerate().skip(i + 1).find_map(|(j, m)| {
-                            if m.role == "assistant" {
-                                if let Some(calls) = &m.tool_calls {
-                                    if calls.iter().any(|c| c.id == *tool_call_id) {
-                                        return Some(j);
+                        if let Some(pos) =
+                            messages.iter().enumerate().skip(i + 1).find_map(|(j, m)| {
+                                if m.role == "assistant" {
+                                    if let Some(calls) = &m.tool_calls {
+                                        if calls.iter().any(|c| c.id == *tool_call_id) {
+                                            return Some(j);
+                                        }
                                     }
                                 }
-                            }
-                            None
-                        }) {
+                                None
+                            })
+                        {
                             debug!(
                                 "Found assistant (index {}) corresponding to tool message (index {}), re-ordering",
                                 pos, i
@@ -342,12 +345,10 @@ impl OpenAIProvider {
                                 "Orphaned tool message with id '{}' at index {} (no matching assistant)",
                                 tool_call_id, i
                             );
-                            return Err(crate::error::Error::Other(
-                                format!(
-                                    "Tool message with id '{}' has no corresponding assistant message",
-                                    tool_call_id
-                                ),
-                            ));
+                            return Err(crate::error::Error::Other(format!(
+                                "Tool message with id '{}' has no corresponding assistant message",
+                                tool_call_id
+                            )));
                         }
                     }
                 } else {
@@ -361,7 +362,10 @@ impl OpenAIProvider {
             i += 1;
         }
 
-        debug!("Converted {} messages for the request after re-ordering", messages.len());
+        debug!(
+            "Converted {} messages for the request after re-ordering",
+            messages.len()
+        );
 
         // Add tools if present
         let tools = chat
@@ -941,9 +945,9 @@ mod tests {
 
     #[test]
     fn test_tool_messages_reordered() {
+        use crate::Chat;
         use crate::message::{Function, ToolCall};
         use crate::model::OpenAi;
-        use crate::Chat;
 
         let tool_call_id = "call_123";
 
@@ -951,14 +955,16 @@ mod tests {
         let chat = Chat::default()
             .add_message(crate::message::Message::user("hello"))
             .add_message(crate::message::Message::tool(tool_call_id, "OK"))
-            .add_message(crate::message::Message::assistant_with_tool_calls(vec![ToolCall {
-                id: tool_call_id.to_string(),
-                tool_type: "function".to_string(),
-                function: Function {
-                    name: "respond_chat".to_string(),
-                    arguments: "{}".to_string(),
+            .add_message(crate::message::Message::assistant_with_tool_calls(vec![
+                ToolCall {
+                    id: tool_call_id.to_string(),
+                    tool_type: "function".to_string(),
+                    function: Function {
+                        name: "respond_chat".to_string(),
+                        arguments: "{}".to_string(),
+                    },
                 },
-            }]));
+            ]));
 
         let provider = OpenAIProvider::new();
         let model = OpenAi::GPT35Turbo;
