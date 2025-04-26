@@ -29,6 +29,10 @@ pub fn setup_tracing(level: Level) {
 
 /// Get an Anthropic provider if API key is available
 pub fn get_anthropic_provider() -> Option<AnthropicProvider> {
+    // Opt-in to live provider tests via environment variable.
+    if env::var("LIVE_PROVIDER_TESTS").unwrap_or_default() != "1" {
+        return None;
+    }
     dotenv().ok();
     match env::var("ANTHROPIC_API_KEY") {
         Ok(key) if !key.is_empty() => Some(AnthropicProvider::with_config(AnthropicConfig {
@@ -42,6 +46,9 @@ pub fn get_anthropic_provider() -> Option<AnthropicProvider> {
 
 /// Get an OpenAI provider if API key is available
 pub fn get_openai_provider() -> Option<OpenAIProvider> {
+    if env::var("LIVE_PROVIDER_TESTS").unwrap_or_default() != "1" {
+        return None;
+    }
     dotenv().ok();
     match env::var("OPENAI_API_KEY") {
         Ok(key) if !key.is_empty() => Some(OpenAIProvider::with_config(OpenAIConfig {
@@ -55,6 +62,9 @@ pub fn get_openai_provider() -> Option<OpenAIProvider> {
 
 /// Get a Gemini provider if API key is available
 pub fn get_google_provider() -> Option<GeminiProvider> {
+    if env::var("LIVE_PROVIDER_TESTS").unwrap_or_default() != "1" {
+        return None;
+    }
     dotenv().ok();
     match env::var("GEMINI_API_KEY") {
         Ok(key) if !key.is_empty() => Some(GeminiProvider::with_config(GeminiConfig {
@@ -67,6 +77,9 @@ pub fn get_google_provider() -> Option<GeminiProvider> {
 
 /// Get a Mistral provider if API key is available
 pub fn get_mistral_provider() -> Option<MistralProvider> {
+    if env::var("LIVE_PROVIDER_TESTS").unwrap_or_default() != "1" {
+        return None;
+    }
     dotenv().ok();
     match env::var("MISTRAL_API_KEY") {
         Ok(key) if !key.is_empty() => Some(MistralProvider::with_config(MistralConfig {
