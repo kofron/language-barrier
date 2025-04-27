@@ -139,8 +139,16 @@ async fn test_request_creation() {
 }
 
 // Live integration test with all available providers
+/// Live integration test that exercises the real HTTP providers.  The test is
+/// *opt-in* via the `LIVE_PROVIDER_TESTS=1` environment variable so that CI
+/// runs (which do not have network access or credentials) can skip it.
 #[tokio::test]
 async fn test_basic_chat_integration() {
+    // Only run when explicitly requested.
+    if std::env::var("LIVE_PROVIDER_TESTS").unwrap_or_default() != "1" {
+        eprintln!("Skipping live provider integration tests – set LIVE_PROVIDER_TESTS=1 to enable");
+        return;
+    }
     setup_tracing();
     info!("Starting test_basic_chat_integration");
 
