@@ -296,76 +296,11 @@ impl OpenAIProvider {
         // message we treat this as a programming error and bail out early with
         // `Error::Other`.
 
-        debug!("Re-ordering assistant / tool messages to satisfy OpenAI requirements");
+        // Note: The ordering of assistant and tool messages is left untouched.
+        // Responsibility for providing messages in a valid order lies with the
+        // caller.  We simply forward the history as‐is.
 
-        let mut i = 0;
-        while i < messages.len() {
-            // SAFETY: we only read, not mutate, inside the first borrow scope.
-            if messages[i].role == "tool" {
-                let tool_call_id_opt = messages[i].tool_call_id.clone();
-
-                if let Some(ref tool_call_id) = tool_call_id_opt {
-                    let has_preceding_assistant = if i == 0 {
-                        false
-                    } else {
-                        let prev = &messages[i - 1];
-                        prev.role == "assistant"
-                            && prev
-                                .tool_calls
-                                .as_ref()
-                                .is_some_and(|calls| calls.iter().any(|c| c.id == *tool_call_id))
-                    };
-
-                    if !has_preceding_assistant {
-                        // Look ahead for the matching assistant message
-                        if let Some(pos) =
-                            messages.iter().enumerate().skip(i + 1).find_map(|(j, m)| {
-                                if m.role == "assistant" {
-                                    if let Some(calls) = &m.tool_calls {
-                                        if calls.iter().any(|c| c.id == *tool_call_id) {
-                                            return Some(j);
-                                        }
-                                    }
-                                }
-                                None
-                            })
-                        {
-                            debug!(
-                                "Found assistant (index {}) corresponding to tool message (index {}), re-ordering",
-                                pos, i
-                            );
-                            let assistant_msg = messages.remove(pos);
-                            messages.insert(i, assistant_msg);
-                            // After inserting, the tool message is now at i+1, so we
-                            // advance past both.
-                            i += 2;
-                            continue;
-                        } else {
-                            error!(
-                                "Orphaned tool message with id '{}' at index {} (no matching assistant)",
-                                tool_call_id, i
-                            );
-                            return Err(crate::error::Error::Other(format!(
-                                "Tool message with id '{}' has no corresponding assistant message",
-                                tool_call_id
-                            )));
-                        }
-                    }
-                } else {
-                    // Tool message without id is invalid – drop it.
-                    error!("Tool message without tool_call_id at index {}", i);
-                    return Err(crate::error::Error::Other(
-                        "Tool message missing tool_call_id".to_string(),
-                    ));
-                }
-            }
-            i += 1;
-        }
-
-        debug!(
-            "Converted {} messages for the request after re-ordering",
-            messages.len()
-        );
+        debug!("Converted {} messages for the request", messages.len());
 
         // Add tools if present
         let tools = chat
@@ -943,61 +878,262 @@ mod tests {
         assert_eq!(error.code, Some("model_not_found".to_string()));
     }
 
-    #[test]
-    fn test_tool_messages_reordered() {
-        use crate::Chat;
-        use crate::message::{Function, ToolCall};
-        use crate::model::OpenAi;
+    // Note: Reordering and orphan-tool detection tests were removed because this
+    // logic has been moved out of the provider.
 
-        let tool_call_id = "call_123";
+    // ---------------------------------------------------------------------
+    // Multi-turn tool-calling serialization tests
+    // ---------------------------------------------------------------------
 
-        // Build chat with invalid order: user -> tool -> assistant(tool_calls)
-        let chat = Chat::default()
-            .add_message(crate::message::Message::user("hello"))
-            .add_message(crate::message::Message::tool(tool_call_id, "OK"))
-            .add_message(crate::message::Message::assistant_with_tool_calls(vec![
-                ToolCall {
-                    id: tool_call_id.to_string(),
-                    tool_type: "function".to_string(),
-                    function: Function {
-                        name: "respond_chat".to_string(),
-                        arguments: "{}".to_string(),
-                    },
+    /// Returns a minimal `LlmToolInfo` for the `get_weather` tool that the
+    /// fixture conversation relies on.
+    fn get_weather_tool_info() -> crate::tool::LlmToolInfo {
+        use serde_json::json;
+
+        crate::tool::LlmToolInfo {
+            name: "get_weather".to_string(),
+            description: "Get current temperature for a given location.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "location": {
+                        "type": "string",
+                        "description": "City and country e.g. Bogotá, Colombia"
+                    }
                 },
-            ]));
+                "required": ["location"],
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    /// Helper to build a fresh `Chat` with the weather tool already registered.
+    fn base_chat_with_tool() -> crate::Chat {
+        crate::Chat::default().with_tools(vec![get_weather_tool_info()])
+    }
+
+    /// Stage-1: only the initial user message exists.  The request payload
+    /// should contain exactly that user message plus the registered tool
+    /// definition.
+    #[test]
+    fn test_stage1_user_only_serialization() {
+        use crate::model::OpenAi;
+        use crate::message::Message;
+
+        let chat = base_chat_with_tool()
+            .add_message(Message::user("What is the weather like in Paris today?"));
 
         let provider = OpenAIProvider::new();
-        let model = OpenAi::GPT35Turbo;
-
-        // Use the private method directly (we are in the same module).
         let request = provider
-            .create_request_payload(model, &chat)
+            .create_request_payload(OpenAi::GPT35Turbo, &chat)
             .expect("payload generation failed");
 
-        let roles: Vec<_> = request.messages.iter().map(|m| m.role.as_str()).collect();
+        // 1. Messages
+        assert_eq!(request.messages.len(), 1);
+        let msg = &request.messages[0];
+        assert_eq!(msg.role, "user");
+        assert_eq!(msg.content.as_deref(), Some("What is the weather like in Paris today?"));
+        assert!(msg.tool_calls.is_none());
+        assert!(msg.tool_call_id.is_none());
 
-        // Expected order: user, assistant, tool
-        let user_idx = roles.iter().position(|r| *r == "user").unwrap();
-        let assistant_idx = roles.iter().position(|r| *r == "assistant").unwrap();
-        let tool_idx = roles.iter().position(|r| *r == "tool").unwrap();
+        // 2. Tools – the weather tool should be present
+        let tools = request.tools.expect("tools should be present");
+        assert!(tools.iter().any(|t| t.function.name == "get_weather"));
 
-        assert!(assistant_idx > user_idx);
-        assert!(tool_idx > assistant_idx);
+        // 3. Default tool_choice should be "auto" when tools are provided
+        assert_eq!(request.tool_choice, Some(serde_json::json!("auto")));
     }
 
+    /// Stage-2: assistant responds with a tool call (no content).  We expect
+    /// the serialized payload to include the assistant message with the
+    /// correct `tool_calls` structure.
     #[test]
-    fn test_orphan_tool_returns_error() {
-        use crate::Chat;
+    fn test_stage2_assistant_tool_call_serialization() {
+        use crate::model::OpenAi;
+        use crate::message::{Function, Message, ToolCall};
 
-        // tool message without matching assistant
-        let chat = Chat::default()
-            .add_message(crate::message::Message::user("hello"))
-            .add_message(crate::message::Message::tool("call_999", "OK"));
+        const CALL_ID: &str = "call_19InQqbLUTQIuc6MlV5QSogY";
+
+        // Build assistant message containing the tool call
+        let assistant_msg = Message::assistant_with_tool_calls(vec![ToolCall {
+            id: CALL_ID.to_string(),
+            tool_type: "function".to_string(),
+            function: Function {
+                name: "get_weather".to_string(),
+                arguments: "{\"location\":\"Paris, France\"}".to_string(),
+            },
+        }]);
+
+        let chat = base_chat_with_tool()
+            .add_message(Message::user("What is the weather like in Paris today?"))
+            .add_message(assistant_msg);
 
         let provider = OpenAIProvider::new();
-        let model = crate::model::OpenAi::GPT35Turbo;
+        let request = provider
+            .create_request_payload(OpenAi::GPT35Turbo, &chat)
+            .expect("payload generation failed");
 
-        let res = provider.create_request_payload(model, &chat);
-        assert!(res.is_err(), "Expected error for orphaned tool");
+        assert_eq!(request.messages.len(), 2);
+
+        // Check ordering: user first, assistant second
+        assert_eq!(request.messages[0].role, "user");
+        let assistant = &request.messages[1];
+        assert_eq!(assistant.role, "assistant");
+        assert!(assistant.content.is_none());
+
+        // Validate tool_calls structure
+        let calls = assistant.tool_calls.as_ref().expect("tool_calls missing");
+        assert_eq!(calls.len(), 1);
+        let call = &calls[0];
+        assert_eq!(call.id, CALL_ID);
+        assert_eq!(call.r#type, "function");
+        assert_eq!(call.function.name, "get_weather");
+        assert_eq!(call.function.arguments, "{\"location\":\"Paris, France\"}");
     }
+
+    /// Stage-3: the tool responds.  The serialized payload must place the
+    /// assistant message *immediately* before the corresponding tool message
+    /// (which our re-ordering logic guarantees) and preserve IDs.
+    #[test]
+    fn test_stage3_tool_response_serialization() {
+        use crate::model::OpenAi;
+        use crate::message::{Function, Message, ToolCall};
+
+        const CALL_ID: &str = "call_19InQqbLUTQIuc6MlV5QSogY";
+
+        let assistant_msg = Message::assistant_with_tool_calls(vec![ToolCall {
+            id: CALL_ID.to_string(),
+            tool_type: "function".to_string(),
+            function: Function {
+                name: "get_weather".to_string(),
+                arguments: "{\"location\":\"Paris, France\"}".to_string(),
+            },
+        }]);
+
+        let tool_msg = Message::tool(CALL_ID, "10C");
+
+        let chat = base_chat_with_tool()
+            .add_message(Message::user("What is the weather like in Paris today?"))
+            .add_message(assistant_msg)
+            .add_message(tool_msg);
+
+        let provider = OpenAIProvider::new();
+        let request = provider
+            .create_request_payload(OpenAi::GPT35Turbo, &chat)
+            .expect("payload generation failed");
+
+        // Expect 3 messages with correct ordering
+        assert_eq!(request.messages.len(), 3);
+        assert_eq!(request.messages[0].role, "user");
+        assert_eq!(request.messages[1].role, "assistant");
+        assert_eq!(request.messages[2].role, "tool");
+
+        // Validate the tool message fields
+        let tool = &request.messages[2];
+        assert_eq!(tool.tool_call_id.as_deref(), Some(CALL_ID));
+        assert_eq!(tool.content.as_deref(), Some("10C"));
+    }
+
+    /// Stage-4: the assistant provides the final answer after the tool call.
+    /// All 4 turns must serialize in the correct order and structure.
+    #[test]
+    fn test_stage4_full_conversation_serialization() {
+        use crate::model::OpenAi;
+        use crate::message::{Function, Message, ToolCall};
+
+        const CALL_ID: &str = "call_19InQqbLUTQIuc6MlV5QSogY";
+        let user_msg = Message::user("What is the weather like in Paris today?");
+
+        let assistant_call = Message::assistant_with_tool_calls(vec![ToolCall {
+            id: CALL_ID.to_string(),
+            tool_type: "function".to_string(),
+            function: Function {
+                name: "get_weather".to_string(),
+                arguments: "{\"location\":\"Paris, France\"}".to_string(),
+            },
+        }]);
+
+        let tool_msg = Message::tool(CALL_ID, "10C");
+
+        let final_assistant = Message::assistant("The weather in Paris today is 10°C. Let me know if you need more details or the forecast for the coming days!");
+
+        let chat = base_chat_with_tool()
+            .add_message(user_msg)
+            .add_message(assistant_call)
+            .add_message(tool_msg)
+            .add_message(final_assistant);
+
+        let provider = OpenAIProvider::new();
+        let request = provider
+            .create_request_payload(OpenAi::GPT35Turbo, &chat)
+            .expect("payload generation failed");
+
+        // Verify the order and integrity of messages
+        let roles: Vec<_> = request.messages.iter().map(|m| m.role.as_str()).collect();
+        assert_eq!(roles, vec!["user", "assistant", "tool", "assistant"]);
+
+        let assistant_after_tool = &request.messages[3];
+        assert_eq!(assistant_after_tool.role, "assistant");
+        assert_eq!(assistant_after_tool.content.as_deref(), Some("The weather in Paris today is 10°C. Let me know if you need more details or the forecast for the coming days!"));
+        assert!(assistant_after_tool.tool_calls.is_none());
+    }
+
+    // JSON to test against follows
+    // {
+    //   "model": "gpt-4.1",
+    //   "messages": [
+    //     {
+    //       "role": "user",
+    //       "content": "What is the weather like in Paris today?"
+    //     },
+    //     {
+    //         "role": "assistant",
+    //         "tool_calls": [
+    //           {
+    //             "id": "call_19InQqbLUTQIuc6MlV5QSogY",
+    //             "type": "function",
+    //             "function": {
+    //               "name": "get_weather",
+    //               "arguments": "{\"location\":\"Paris, France\"}"
+    //             }
+    //           }
+    //         ]
+    //       }
+    //     ,
+    //     {
+    //         "role": "tool",
+    //         "tool_call_id": "call_19InQqbLUTQIuc6MlV5QSogY",
+    //       "content": "10C"
+    //       },
+    //     {
+    //         "role": "assistant",
+    //         "content": "The weather in Paris today is 10°C. Let me know if you need more details or the forecast for the coming days!",
+    //         "refusal": null,
+    //         "annotations": []
+    //       }
+    //   ],
+    //   "tools": [
+    //     {
+    //       "type": "function",
+    //       "function": {
+    //         "name": "get_weather",
+    //         "description": "Get current temperature for a given location.",
+    //         "parameters": {
+    //           "type": "object",
+    //           "properties": {
+    //             "location": {
+    //               "type": "string",
+    //               "description": "City and country e.g. Bogotá, Colombia"
+    //             }
+    //           },
+    //           "required": [
+    //             "location"
+    //           ],
+    //           "additionalProperties": false
+    //         },
+    //         "strict": true
+    //       }
+    //     }
+    //   ]
+    // }
 }
