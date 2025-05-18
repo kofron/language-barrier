@@ -105,6 +105,7 @@ impl OllamaProvider {
     }
 
     #[instrument(skip(self, messages, tools))]
+    #[allow(clippy::too_many_arguments)]
     fn create_request_payload(
         &self,
         model: &Ollama,
@@ -371,6 +372,7 @@ impl OllamaModelInfo for Ollama {
 #[async_trait]
 pub trait Provider<M: ModelInfo>: Send + Sync {
     /// Generate a response from the LLM provider
+    #[allow(clippy::too_many_arguments)]
     async fn prompt(
         &self,
         model: &M,
@@ -388,6 +390,7 @@ pub trait Provider<M: ModelInfo>: Send + Sync {
 #[async_trait]
 impl Provider<Ollama> for OllamaProvider {
     #[instrument(skip(self), level = "debug")]
+    #[allow(clippy::too_many_arguments)]
     async fn prompt(
         &self,
         model: &Ollama,
