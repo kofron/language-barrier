@@ -200,7 +200,7 @@ impl OllamaProvider {
         // This is mostly handled by `ollama_tools` construction logic and `ToolChoice::None` not setting `tools`.
         // However, if LlmProvider `prompt` is called with `tools = None` but `tool_choice = ToolChoice::Any` (which is weird),
         // we should respect `tools = None`.
-        let final_tools = if tools.map_or(true, |t| t.is_empty()) {
+        let final_tools = if tools.is_none_or(|t| t.is_empty()) {
             None
         } else {
             ollama_tools
@@ -404,14 +404,14 @@ impl Provider<Ollama> for OllamaProvider {
         debug!("Model: {:?}", model);
         debug!("Number of messages: {}", messages.len());
         debug!("System prompt provided: {}", system_prompt.is_some());
-        debug!("Tools provided: {}", tools.map_or(false, |t| !t.is_empty()));
+        debug!("Tools provided: {}", tools.is_some_and(|t| !t.is_empty()));
         debug!("Tool choice provided: {}", tool_choice.is_some());
 
         let request_url = self
             .config
             .base_url
             .join("chat")
-            .map_err(|e| Error::BaseUrlError(e))?;
+            .map_err(Error::BaseUrlError)?;
         debug!("Request URL: {}", request_url);
 
         let request_payload = self.create_request_payload(
