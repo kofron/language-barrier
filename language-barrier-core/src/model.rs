@@ -29,6 +29,32 @@ pub enum Claude {
     Opus3,
 }
 
+/// Represents an Ollama model
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ollama {
+    /// Llama 3 models
+    Llama3 { size: OllamaModelSize },
+    /// LlaVA multimodal models
+    Llava,
+    /// Mistral models
+    Mistral { size: OllamaModelSize },
+    /// Custom model with specified name
+    Custom { name: &'static str },
+}
+
+/// Standard model sizes for Ollama models
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OllamaModelSize {
+    /// 8B parameters
+    _8B,
+    /// 7B parameters
+    _7B,
+    /// 3B parameters
+    _3B,
+    /// 1B parameters
+    _1B,
+}
+
 impl Default for Claude {
     fn default() -> Self {
         Self::Opus3
@@ -191,5 +217,41 @@ impl crate::provider::mistral::MistralModelInfo for Mistral {
             Self::Embed => "mistral-embed",
         }
         .to_string()
+    }
+}
+
+impl Default for Ollama {
+    fn default() -> Self {
+        Self::Llama3 { size: OllamaModelSize::_7B }
+    }
+}
+
+impl ModelInfo for Ollama {
+    fn context_window(&self) -> usize {
+        match self {
+            Self::Llama3 { size } => match size {
+                OllamaModelSize::_8B => 32_768,
+                OllamaModelSize::_7B => 32_768,
+                OllamaModelSize::_3B => 16_384,
+                OllamaModelSize::_1B => 8_192,
+            },
+            Self::Llava => 8_192,
+            Self::Mistral { size } => match size {
+                OllamaModelSize::_8B => 32_768,
+                OllamaModelSize::_7B => 16_384,
+                OllamaModelSize::_3B => 8_192,
+                OllamaModelSize::_1B => 4_096,
+            },
+            Self::Custom { .. } => 8_192, // Default for unknown models
+        }
+    }
+
+    fn max_output_tokens(&self) -> usize {
+        match self {
+            Self::Llama3 { .. } => 4_096,
+            Self::Llava => 4_096,
+            Self::Mistral { .. } => 4_096,
+            Self::Custom { .. } => 4_096, // Default for unknown models
+        }
     }
 }

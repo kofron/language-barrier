@@ -7,6 +7,7 @@ use reqwest::Request;
 pub mod anthropic;
 pub mod gemini;
 pub mod mistral;
+pub mod ollama;
 pub mod openai;
 
 /// An `HTTPProvider` can take a chat and turn it into an http request.

@@ -17,6 +17,7 @@ schemars = { workspace = true }
 url = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+uuid = "1.16.0"
 
 [dev-dependencies]
 tokio-test = { workspace = true }
