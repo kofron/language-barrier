@@ -23,3 +23,5 @@ Cargo.lock
 # Package files
 *.tar.gz
 *.zip
+
+**/.claude/settings.local.json
