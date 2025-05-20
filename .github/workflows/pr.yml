@@ -41,7 +41,10 @@ jobs:
     - name: Run Clippy
       run: cargo clippy --workspace -- -D warnings
     
-    - name: Run tests
-      run: cargo test --workspace --verbose
-      env:
-        RUST_BACKTRACE: 1
+      - name: Run tests
+        run: cargo test --workspace --verbose
+        env:
+          RUST_BACKTRACE: 1
+
+      - name: Check wasm build
+        run: cargo check -p language-barrier-core --no-default-features --target wasm32-unknown-unknown

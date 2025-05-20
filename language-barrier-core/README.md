@@ -19,12 +19,25 @@ Language Barrier simplifies working with multiple LLM providers by offering a un
 
 ## Installation
 
-Add the library to your Cargo.toml:
+Add the library to your `Cargo.toml`:
 
 ```toml
 [dependencies]
 language-barrier = "0.1.0"
 ```
+
+The `language-barrier-core` crate depends on [`schemars`](https://docs.rs/schemars) for
+JSON schema generation. This dependency is optional and controlled by the
+`schema` feature which is enabled by default. When targeting environments where
+`schemars` is unavailable, such as WebAssembly, disable the feature:
+
+```toml
+[dependencies]
+language-barrier = { version = "0.1.0", default-features = false }
+```
+
+With the feature disabled the `Tool` and `ToolDefinition` traits still work but
+schema generation via `schema()` will return an error.
 
 ## Quick Start
 
@@ -218,6 +231,17 @@ let mut chat = Chat::new(Claude::Haiku3)
 
 // The library automatically tracks token usage and compacts history
 // when it exceeds the model's context window
+```
+
+### WebAssembly Support
+
+`language-barrier-core` can be compiled for `wasm32-unknown-unknown`. Enable the
+`wasm` feature on `reqwest` (enabled by default in this workspace) and disable
+the optional `schema` feature if `schemars` is not available:
+
+```bash
+cargo build -p language-barrier-core --target wasm32-unknown-unknown \
+    --no-default-features
 ```
 
 ## Documentation

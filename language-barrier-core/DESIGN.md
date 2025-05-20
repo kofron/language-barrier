@@ -1214,3 +1214,17 @@ The library uses the following Rust crates:
 - `http` for testing HTTP responses
 
 Additional crates may be added as needed for specific features.
+
+#### 2025-05-20: Optional Schema Feature and WASM Compatibility
+
+To support compiling the core crate to `wasm32-unknown-unknown`, the `schemars`
+dependency is now optional behind a new `schema` feature. The workspace enables
+`reqwest`'s `wasm` feature with `default-features` disabled. Building the crate
+for WebAssembly requires:
+
+```bash
+cargo build -p language-barrier-core --target wasm32-unknown-unknown --no-default-features
+```
+
+The `Tool` and `ToolDefinition` traits remain available without JSON schema
+support, returning an error from `schema()` when the feature is disabled.
