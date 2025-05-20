@@ -1,3 +1,4 @@
+#[cfg(feature = "schema")]
 use schemars::JsonSchema;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
@@ -37,6 +38,7 @@ use crate::error::Result;
 ///     }
 /// }
 /// ```
+#[cfg(feature = "schema")]
 pub trait Tool
 where
     Self: JsonSchema,
@@ -50,6 +52,12 @@ where
     ///
     /// This description is sent to the LLM to help it understand when and how
     /// to use the tool. It should be clear and concise.
+    fn description(&self) -> &str;
+}
+
+#[cfg(not(feature = "schema"))]
+pub trait Tool {
+    fn name(&self) -> &str;
     fn description(&self) -> &str;
 }
 
@@ -100,6 +108,7 @@ where
 ///     }
 /// }
 /// ```
+#[cfg(feature = "schema")]
 pub trait ToolDefinition {
     /// The input type that this tool accepts
     type Input: DeserializeOwned + JsonSchema + Send + Sync + 'static;
@@ -118,6 +127,19 @@ pub trait ToolDefinition {
         let schema = schemars::schema_for!(Self::Input);
         serde_json::to_value(schema.schema)
             .map_err(|e| crate::Error::Other(format!("Schema generation failed: {}", e)))
+    }
+}
+
+#[cfg(not(feature = "schema"))]
+pub trait ToolDefinition {
+    type Input: DeserializeOwned + Send + Sync + 'static;
+    type Output: Serialize + Send + Sync + 'static;
+    fn name(&self) -> String;
+    fn description(&self) -> String;
+    fn schema(&self) -> Result<Value> {
+        Err(crate::Error::Other(
+            "Schema generation requires the `schema` feature".to_string(),
+        ))
     }
 }
 
